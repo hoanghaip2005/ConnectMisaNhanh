@@ -29,4 +29,10 @@ router.post('/nhanh', (req, res) => webhookController.handleWebhook(req, res));
  */
 router.get('/status', (req, res) => webhookController.getWebhookStatus(req, res));
 
+/**
+ * GET /api/webhooks/health
+ * Simple health check endpoint - Trả về nhanh để test connection
+ */
+router.get('/health', (req, res) => webhookController.healthCheck(req, res));
+
 export default router;

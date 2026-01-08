@@ -48,6 +48,9 @@ class WebhookController {
     /**
      * Main webhook handler
      * POST /api/webhooks/nhanh
+     * 
+     * IMPORTANT: Trả về response ngay lập tức để tránh timeout
+     * Xử lý order trong background
      */
     public async handleWebhook(req: Request, res: Response): Promise<void> {
         try {
@@ -69,33 +72,7 @@ class WebhookController {
                 console.log('========================================');
             }
 
-            // Xử lý các loại events
-            if (event === 'paymentReceived') {
-                // Xử lý hoá đơn bán lẻ nhận thanh toán
-                await this.handlePaymentReceived(data);
-
-                res.status(200).json({
-                    success: true,
-                    message: 'Payment received event processed',
-                    processedAt: new Date().toISOString()
-                });
-                return;
-            }
-
-            // Chỉ xử lý order events
-            if (event !== 'orderAdd' && event !== 'orderUpdate') {
-                if (process.env.NODE_ENV === 'development') {
-                    console.log(`[WEBHOOK] Skipping event: ${event} (not supported)`);
-                }
-
-                res.status(200).json({
-                    success: true,
-                    message: 'Webhook received (non-supported event)',
-                    processedAt: new Date().toISOString()
-                });
-                return;
-            }
-
+            // Verify signature trước khi xử lý
             if (signature) {
                 const isValid = this.verifySignature(JSON.stringify(req.body), signature);
                 if (!isValid) {
@@ -107,32 +84,64 @@ class WebhookController {
                 }
             }
 
-            // Xử lý event với orderId cụ thể
-            // Webhook từ Nhanh.vn gửi orderId ở data.info.id
-            let orderId = data?.info?.id || data?.orderId || data?.id || req.body.id || req.body.orderId;
-            let status = data?.info?.status || data?.status || req.body.status;
-            let saleChannel = data?.channel?.saleChannel || data?.saleChannel || data?.sale_channel || req.body.saleChannel;
-
-            if (orderId) {
-                // Có orderId - xử lý trực tiếp
-                console.log(`[WEBHOOK] Processing order ${orderId} with status ${status}`);
-                await this.processOrderEvent(orderId, status, saleChannel);
-            } else {
-                // Không có orderId - lấy đơn mới nhất
-                console.log('[WEBHOOK] No orderId found - fetching recent orders with status 60');
-                await this.handleOrderEventWithoutId(event);
-            }
-
+            // TRẢ VỀ RESPONSE NGAY LẬP TỨC (< 1 giây)
+            // Tránh timeout từ Nhanh API (3 giây)
             res.status(200).json({
                 success: true,
-                message: 'Webhook received',
-                processedAt: new Date().toISOString()
+                message: 'Webhook received and queued for processing',
+                receivedAt: new Date().toISOString()
+            });
+
+            // XỬ LÝ TRONG BACKGROUND (không chờ đợi)
+            // Sử dụng setImmediate để xử lý sau khi response đã được gửi
+            setImmediate(async () => {
+                try {
+                    // Xử lý các loại events
+                    if (event === 'paymentReceived') {
+                        // Xử lý hoá đơn bán lẻ nhận thanh toán
+                        await this.handlePaymentReceived(data);
+                        console.log('[WEBHOOK] Payment received event processed successfully');
+                        return;
+                    }
+
+                    // Chỉ xử lý order events
+                    if (event !== 'orderAdd' && event !== 'orderUpdate') {
+                        if (process.env.NODE_ENV === 'development') {
+                            console.log(`[WEBHOOK] Skipping event: ${event} (not supported)`);
+                        }
+                        return;
+                    }
+
+                    // Xử lý event với orderId cụ thể
+                    // Webhook từ Nhanh.vn gửi orderId ở data.info.id
+                    let orderId = data?.info?.id || data?.orderId || data?.id || req.body.id || req.body.orderId;
+                    let status = data?.info?.status || data?.status || req.body.status;
+                    let saleChannel = data?.channel?.saleChannel || data?.saleChannel || data?.sale_channel || req.body.saleChannel;
+
+                    if (orderId) {
+                        // Có orderId - xử lý trực tiếp
+                        console.log(`[WEBHOOK] Processing order ${orderId} with status ${status}`);
+                        await this.processOrderEvent(orderId, status, saleChannel);
+                    } else {
+                        // Không có orderId - lấy đơn mới nhất
+                        console.log('[WEBHOOK] No orderId found - fetching recent orders with status 60');
+                        await this.handleOrderEventWithoutId(event);
+                    }
+
+                    console.log('[WEBHOOK] Order processing completed successfully');
+                } catch (error) {
+                    console.error('[WEBHOOK] Error during background processing:', error);
+                    // Log error nhưng không ảnh hưởng đến response đã gửi
+                }
             });
 
         } catch (error) {
+            console.error('[WEBHOOK] Error handling webhook:', error);
+            // Vẫn trả về 200 để Nhanh không gửi lại
             res.status(200).json({
                 success: true,
-                message: 'Webhook received'
+                message: 'Webhook received',
+                note: 'Error occurred but queued for retry'
             });
         }
     }
@@ -323,6 +332,19 @@ class WebhookController {
                 message: error.message
             });
         }
+    }
+
+    /**
+     * Health check endpoint - Trả về nhanh để test connection
+     * GET /api/webhooks/health
+     */
+    public async healthCheck(req: Request, res: Response): Promise<void> {
+        res.status(200).json({
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            message: 'Webhook endpoint is ready'
+        });
     }
 }
 
