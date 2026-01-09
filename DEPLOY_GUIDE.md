@@ -1,6 +1,7 @@
 # 🚀 Quick Deploy Guide - Fix Webhook Timeout
 
 ## 🎯 Vấn đề đã fix
+
 ✅ **Webhook timeout sau 3 giây** → Giờ response < 1 giây  
 ✅ **31/31 đơn sẽ được xử lý thành công** (không còn timeout)
 
@@ -9,6 +10,7 @@
 ## 📦 Deploy lên VPS
 
 ### 1. Upload code mới
+
 ```bash
 # Từ máy local - commit và push
 git add .
@@ -22,6 +24,7 @@ git pull origin main
 ```
 
 ### 2. Build và Restart
+
 ```bash
 # Build lại
 npm install
@@ -37,6 +40,7 @@ pm2 logs middleware-integration --lines 50
 ```
 
 ### 3. Kiểm tra Firewall
+
 ```bash
 # Ubuntu/Debian với UFW
 sudo ufw allow 3000/tcp
@@ -54,6 +58,7 @@ sudo firewall-cmd --list-all
 ```
 
 **Nếu dùng Cloud (AWS/DigitalOcean/GCP):**
+
 - Vào Security Groups / Firewall
 - Thêm Inbound Rules cho port 3000, 80, 443
 - Source: 0.0.0.0/0
@@ -63,6 +68,7 @@ sudo firewall-cmd --list-all
 ## 🧪 Test
 
 ### Cách 1: Dùng script tự động
+
 ```bash
 # Trên VPS
 cd /path/to/middleware-integration
@@ -70,14 +76,16 @@ cd /path/to/middleware-integration
 ```
 
 Kết quả mong đợi:
+
 ```
 ✅ Health Check OK - Response time < 1s
-✅ Status Check OK - Response time < 1s  
+✅ Status Check OK - Response time < 1s
 ✅ Webhook POST OK - Response time < 1s
 ✅✅✅ ALL TESTS PASSED!
 ```
 
 ### Cách 2: Test thủ công
+
 ```bash
 # Test health check
 curl -X GET https://api.activ.vn/api/webhooks/health
@@ -96,6 +104,7 @@ curl -X POST https://api.activ.vn/api/webhooks/nhanh \
 ```
 
 ### Cách 3: Test từ Nhanh.vn Portal
+
 1. Vào **Cài đặt → Webhooks**
 2. Test endpoint: `https://api.activ.vn/api/webhooks/health`
 3. Phải nhận được response ngay lập tức
@@ -121,29 +130,35 @@ curl -X POST https://api.activ.vn/api/webhooks/nhanh \
 ### Nếu vẫn timeout:
 
 **1. Kiểm tra server running:**
+
 ```bash
 pm2 status
 netstat -tlnp | grep 3000
 ```
 
 **2. Kiểm tra response time:**
+
 ```bash
 time curl https://api.activ.vn/api/webhooks/health
 ```
+
 Phải < 1 giây!
 
 **3. Kiểm tra logs:**
+
 ```bash
 pm2 logs middleware-integration
 ```
 
 Phải thấy:
+
 ```
 [WEBHOOK] Processing order 681155116 with status 60
 [WEBHOOK] Order processing completed successfully
 ```
 
 **4. Kiểm tra NGINX (nếu có):**
+
 ```bash
 sudo nano /etc/nginx/sites-available/default
 
@@ -157,6 +172,7 @@ sudo systemctl restart nginx
 ```
 
 **5. Kiểm tra resources:**
+
 ```bash
 top
 free -h
@@ -168,6 +184,7 @@ df -h
 ## 📚 Tài liệu chi tiết
 
 Xem file `WEBHOOK_TIMEOUT_FIX.md` để hiểu rõ hơn về:
+
 - Nguyên nhân timeout
 - Cách code đã được fix
 - Troubleshooting chi tiết
@@ -178,6 +195,7 @@ Xem file `WEBHOOK_TIMEOUT_FIX.md` để hiểu rõ hơn về:
 ## 🎉 Kết quả
 
 Sau khi deploy:
+
 - ✅ **Webhook response < 1 giây** (không timeout)
 - ✅ **31/31 đơn được xử lý thành công**
 - ✅ **Xử lý trong background** (không block)
@@ -188,11 +206,13 @@ Sau khi deploy:
 ## 📞 Support
 
 Nếu vẫn gặp vấn đề, check:
+
 1. Server có đủ RAM/CPU không?
 2. MISA API có phản hồi nhanh không?
 3. Network từ Nhanh → VPS có ổn định không?
 
 Xem logs chi tiết:
+
 ```bash
 pm2 logs middleware-integration --lines 200
 ```

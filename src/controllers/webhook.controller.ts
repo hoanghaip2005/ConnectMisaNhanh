@@ -10,8 +10,10 @@ import amisService from '../services/amis.services';
  * Handles incoming webhooks from Nhanh.vn
  * 
  * Supported Events:
- * 1. orderAdd/orderUpdate: Order Success (status = 60)
- * 2. paymentReceived: Hoá đơn bán lẻ nhận thanh toán
+ * 1. orderAdd/orderUpdate: Đơn hàng status = 60 (Thành công)
+ * 2. orderAdd/orderUpdate: Đơn hàng status = 60 + saleChannel = 42 (Shopee)
+ * 
+ * Note: Hoá đơn bán lẻ xử lý thủ công qua API endpoint
  */
 class WebhookController {
     private nhanhService: NhanhService;
@@ -63,8 +65,8 @@ class WebhookController {
                 console.log('Event:', event);
                 console.log('BusinessId:', businessId);
 
-                // Log data cho order và payment events
-                if (event === 'orderAdd' || event === 'orderUpdate' || event === 'paymentReceived') {
+                // Log data cho order events
+                if (event === 'orderAdd' || event === 'orderUpdate') {
                     console.log('Data:', JSON.stringify(data, null, 2));
                     console.log('Full body:', JSON.stringify(req.body, null, 2));
                 }
@@ -96,14 +98,6 @@ class WebhookController {
             // Sử dụng setImmediate để xử lý sau khi response đã được gửi
             setImmediate(async () => {
                 try {
-                    // Xử lý các loại events
-                    if (event === 'paymentReceived') {
-                        // Xử lý hoá đơn bán lẻ nhận thanh toán
-                        await this.handlePaymentReceived(data);
-                        console.log('[WEBHOOK] Payment received event processed successfully');
-                        return;
-                    }
-
                     // Chỉ xử lý order events
                     if (event !== 'orderAdd' && event !== 'orderUpdate') {
                         if (process.env.NODE_ENV === 'development') {
@@ -250,62 +244,12 @@ class WebhookController {
     }
 
     /**
-     * Handle paymentReceived event - Hoá đơn bán lẻ nhận thanh toán
-     */
-    private async handlePaymentReceived(data: any): Promise<void> {
-        try {
-            // Parse billId từ webhook data
-            // Cần xem cấu trúc thực tế của data khi nhận webhook
-            let billId = data?.id || data?.billId || data?.bill?.id;
-
-            if (!billId) {
-                console.log('[WEBHOOK] paymentReceived: No billId found in webhook data');
-                console.log('[WEBHOOK] Data structure:', JSON.stringify(data, null, 2));
-                return;
-            }
-
-            console.log(`[WEBHOOK] Processing payment received for bill ${billId}`);
-
-            // Lấy chi tiết hoá đơn từ Nhanh.vn
-            const billsResponse = await this.nhanhService.getRetailBills({
-                filters: { id: billId },
-                paginator: { size: 1 }
-            });
-
-            if (!billsResponse?.data || billsResponse.data.length === 0) {
-                console.error(`[WEBHOOK] Retail bill ${billId} not found`);
-                return;
-            }
-
-            const bill = billsResponse.data[0];
-
-            // Map sang format AMIS
-            const voucher = amisMapperService.mapRetailBillToAmisVoucher(bill);
-
-            // Lấy access token
-            const accessToken = process.env.MISA_ACCESS_TOKEN;
-            if (!accessToken) {
-                throw new Error('MISA access token not found');
-            }
-
-            // Gửi lên MISA
-            const amisResponse = await amisService.saveVoucher([voucher], accessToken);
-
-            console.log(`✅ [WEBHOOK] Retail bill ${billId} sent to MISA successfully`);
-            console.log('MISA Response:', amisResponse.Data);
-
-        } catch (error: any) {
-            console.error(`[WEBHOOK] Error processing paymentReceived:`, error.message);
-        }
-    }
-
-    /**
      * Get webhook status and configuration
      * GET /api/webhooks/status
      */
     public async getWebhookStatus(req: Request, res: Response): Promise<void> {
         try {
-            const serverUrl = process.env.SERVER_URL || 'https://activ.ngrok.dev';
+            const serverUrl = process.env.SERVER_URL || 'https://api.activ.vn';
             const webhookUrl = `${serverUrl}/api/webhooks/nhanh`;
 
             res.status(200).json({
@@ -315,15 +259,16 @@ class WebhookController {
                 supportedEvents: [
                     {
                         event: 'orderAdd / orderUpdate',
-                        description: 'Đơn hàng thành công',
+                        description: 'Đơn hàng status 60 (Thành công)',
                         filters: { statuses: [60] }
                     },
                     {
-                        event: 'paymentReceived',
-                        description: 'Hoá đơn bán lẻ nhận thanh toán',
-                        filters: {}
+                        event: 'orderAdd / orderUpdate',
+                        description: 'Đơn hàng Shopee status 60',
+                        filters: { statuses: [60], saleChannels: [42] }
                     }
                 ],
+                note: 'Hoá đơn bán lẻ xử lý thủ công qua POST /api/nhanh/bills/retail/process/:billId',
                 timestamp: new Date().toISOString()
             });
         } catch (error: any) {
