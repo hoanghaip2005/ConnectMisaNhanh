@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import nhanhService from '../services/nhanh.services';
 import transformService from '../services/transform.services';
 import amisMapperService from '../services/amis-mapper.services';
+import logger from '../utils/logger';
 
 /**
  * Test map order từ Nhanh.vn sang AMIS voucher
@@ -40,7 +41,7 @@ export const testMapOrder = async (req: Request, res: Response) => {
             voucher: voucher
         });
     } catch (error: any) {
-        console.error('Test map order error:', error.message);
+        logger.error('Test map order error', error);
         res.status(500).json({
             success: false,
             error: error.message

@@ -4,6 +4,7 @@ import { NhanhService } from '../services/nhanh.services';
 import transformService from '../services/transform.services';
 import amisMapperService from '../services/amis-mapper.services';
 import amisService from '../services/amis.services';
+import logger from '../utils/logger';
 
 /**
  * Webhook Controller
@@ -24,12 +25,25 @@ class WebhookController {
 
     /**
      * Verify webhook signature for security
+     * IMPORTANT: BẮT BUỘC phải có signature và secretKey
      */
-    private verifySignature(payload: string, signature: string): boolean {
+    private verifySignature(payload: string, signature: string | undefined): boolean {
         const secretKey = process.env.NHANH_WEBHOOK_SECRET;
 
+        // ❌ REJECT nếu không có secret key (production)
         if (!secretKey) {
-            return true;
+            logger.error('[WEBHOOK SECURITY] NHANH_WEBHOOK_SECRET not configured!');
+            if (process.env.NODE_ENV === 'production') {
+                return false; // Bắt buộc phải có secret trong production
+            }
+            logger.warn('[WEBHOOK SECURITY] Running without signature validation in development mode');
+            return true; // Chỉ cho phép trong development
+        }
+
+        // ❌ REJECT nếu không có signature
+        if (!signature) {
+            logger.error('[WEBHOOK SECURITY] Missing signature header');
+            return false;
         }
 
         try {
@@ -38,11 +52,22 @@ class WebhookController {
                 .update(payload)
                 .digest('hex');
 
+            // ❌ Kiểm tra độ dài trước - tránh lỗi timingSafeEqual
+            if (signature.length !== expectedSignature.length) {
+                logger.error('[WEBHOOK SECURITY] Signature length mismatch', {
+                    received: signature.length,
+                    expected: expectedSignature.length
+                });
+                return false;
+            }
+
+            // ✅ Sử dụng timingSafeEqual để tránh timing attack
             return crypto.timingSafeEqual(
                 Buffer.from(signature),
                 Buffer.from(expectedSignature)
             );
         } catch (error) {
+            logger.error('[WEBHOOK SECURITY] Signature verification error:', error);
             return false;
         }
     }
@@ -57,33 +82,32 @@ class WebhookController {
     public async handleWebhook(req: Request, res: Response): Promise<void> {
         try {
             const { event, businessId, data } = req.body;
-            const signature = req.headers['x-nhanh-signature'] as string;
 
             // DEBUG: Log toàn bộ payload từ Nhanh.vn
             if (process.env.NODE_ENV === 'development') {
-                console.log('=== WEBHOOK RECEIVED FROM NHANH.VN ===');
-                console.log('Event:', event);
-                console.log('BusinessId:', businessId);
-
-                // Log data cho order events
-                if (event === 'orderAdd' || event === 'orderUpdate') {
-                    console.log('Data:', JSON.stringify(data, null, 2));
-                    console.log('Full body:', JSON.stringify(req.body, null, 2));
-                }
-
-                console.log('========================================');
+                logger.webhook('WEBHOOK RECEIVED FROM NHANH.VN', {
+                    event,
+                    businessId,
+                    data: event === 'orderAdd' || event === 'orderUpdate' ? data : undefined
+                });
             }
 
-            // Verify signature trước khi xử lý
-            if (signature) {
-                const isValid = this.verifySignature(JSON.stringify(req.body), signature);
-                if (!isValid) {
-                    res.status(401).json({
-                        success: false,
-                        error: 'Invalid signature'
-                    });
-                    return;
-                }
+            // ✅ BẮT BUỘC verify signature trước khi xử lý
+            const signature = req.headers['x-nhanh-signature'] as string | undefined;
+            const isValid = this.verifySignature(JSON.stringify(req.body), signature);
+
+            if (!isValid) {
+                logger.security('Invalid or missing webhook signature', {
+                    hasSignature: !!signature,
+                    hasSecret: !!process.env.NHANH_WEBHOOK_SECRET,
+                    event: event
+                });
+
+                res.status(401).json({
+                    success: false,
+                    error: 'Unauthorized: Invalid or missing webhook signature'
+                });
+                return;
             }
 
             // TRẢ VỀ RESPONSE NGAY LẬP TỨC (< 1 giây)
@@ -101,7 +125,7 @@ class WebhookController {
                     // Chỉ xử lý order events
                     if (event !== 'orderAdd' && event !== 'orderUpdate') {
                         if (process.env.NODE_ENV === 'development') {
-                            console.log(`[WEBHOOK] Skipping event: ${event} (not supported)`);
+                            logger.debug(`Skipping event: ${event} (not supported)`);
                         }
                         return;
                     }
@@ -114,23 +138,23 @@ class WebhookController {
 
                     if (orderId) {
                         // Có orderId - xử lý trực tiếp
-                        console.log(`[WEBHOOK] Processing order ${orderId} with status ${status}`);
+                        logger.info(`Processing order ${orderId} with status ${status}`);
                         await this.processOrderEvent(orderId, status, saleChannel);
                     } else {
                         // Không có orderId - lấy đơn mới nhất
-                        console.log('[WEBHOOK] No orderId found - fetching recent orders with status 60');
+                        logger.info('No orderId found - fetching recent orders with status 60');
                         await this.handleOrderEventWithoutId(event);
                     }
 
-                    console.log('[WEBHOOK] Order processing completed successfully');
+                    logger.info('Order processing completed successfully');
                 } catch (error) {
-                    console.error('[WEBHOOK] Error during background processing:', error);
+                    logger.error('Error during background processing', error);
                     // Log error nhưng không ảnh hưởng đến response đã gửi
                 }
             });
 
         } catch (error) {
-            console.error('[WEBHOOK] Error handling webhook:', error);
+            logger.error('Error handling webhook', error);
             // Vẫn trả về 200 để Nhanh không gửi lại
             res.status(200).json({
                 success: true,
@@ -153,25 +177,35 @@ class WebhookController {
             if (saleChannel === 42 && status === 60) {
                 // Đơn Shopee thành công
                 shouldProcess = true;
-                console.log(`[WEBHOOK] Processing Shopee order ${orderId} (status 60)`);
+                logger.info(`Processing Shopee order ${orderId} (status 60)`);
             } else if (status === 60) {
                 // Đơn hàng thành công từ kênh khác
                 shouldProcess = true;
-                console.log(`[WEBHOOK] Processing order ${orderId} (status 60, channel ${saleChannel || 'unknown'})`);
+                logger.info(`Processing order ${orderId} (status 60, channel ${saleChannel || 'unknown'})`);
             }
 
             if (!shouldProcess) {
                 if (process.env.NODE_ENV === 'development') {
-                    console.log(`[WEBHOOK] Order ${orderId} skipped - status: ${status}, channel: ${saleChannel}`);
+                    logger.debug(`Order ${orderId} skipped - status: ${status}, channel: ${saleChannel}`);
                 }
                 return;
             }
+
+            // ✅ KIỂM TRA LỊCH SỬ ĐƠN HÀNG - Tránh tạo chứng từ trùng lặp
+            const isFirstTimeStatus60 = await this.checkIfFirstTimeStatus60(orderId);
+            
+            if (!isFirstTimeStatus60) {
+                logger.info(`Order ${orderId} - Already processed before (not first time status 60), skipping...`);
+                return;
+            }
+
+            logger.info(`Order ${orderId} - First time reaching status 60, creating voucher...`);
 
             // Lấy chi tiết đơn hàng từ Nhanh.vn
             const orderResponse = await this.nhanhService.getOrder(orderId);
 
             if (!orderResponse || !orderResponse.data) {
-                console.error(`[WEBHOOK] Order ${orderId} not found`);
+                logger.error(`Order ${orderId} not found`);
                 return;
             }
 
@@ -190,7 +224,7 @@ class WebhookController {
             const accessToken = process.env.MISA_ACCESS_TOKEN;
 
             if (!accessToken) {
-                console.error(`[WEBHOOK] Order ${orderId} - Missing MISA access token`);
+                logger.error(`Order ${orderId} - Missing MISA access token`);
                 return;
             }
 
@@ -199,11 +233,11 @@ class WebhookController {
 
             if (process.env.NODE_ENV === 'development') {
                 const statusLabel = status === 60 ? 'SUCCESS' : 'SHIPPING SHOPEE';
-                console.log(`[WEBHOOK ${statusLabel}] Order ${orderId} sent to MISA successfully`);
+                logger.info(`Order ${orderId} sent to MISA successfully (${statusLabel})`);
             }
 
         } catch (error: any) {
-            console.error(`[WEBHOOK] Error processing order ${orderId}:`, error.message);
+            logger.error(`Error processing order ${orderId}`, error);
         }
     }
 
@@ -212,7 +246,7 @@ class WebhookController {
      */
     private async handleOrderEventWithoutId(event: string): Promise<void> {
         try {
-            console.log(`[WEBHOOK] ${event} without orderId - fetching recent orders with status 60`);
+            logger.info(`${event} without orderId - fetching recent orders with status 60`);
 
             // Lấy đơn hàng thành công trong 5 phút gần nhất
             const fiveMinutesAgo = Math.floor((Date.now() - 5 * 60 * 1000) / 1000);
@@ -227,7 +261,7 @@ class WebhookController {
             });
 
             if (ordersResponse.data && ordersResponse.data.length > 0) {
-                console.log(`[WEBHOOK] Found ${ordersResponse.data.length} recent orders with status 60`);
+                logger.info(`Found ${ordersResponse.data.length} recent orders with status 60`);
 
                 // Xử lý đơn mới nhất
                 const latestOrder = ordersResponse.data[0];
@@ -235,11 +269,56 @@ class WebhookController {
 
                 await this.processOrderEvent(orderId, 60, latestOrder.channel?.saleChannel);
             } else {
-                console.log('[WEBHOOK] No recent orders found with status 60');
+                logger.info('No recent orders found with status 60');
             }
 
         } catch (error: any) {
-            console.error(`[WEBHOOK] Error fetching recent orders:`, error.message);
+            logger.error('Error fetching recent orders', error);
+        }
+    }
+
+    /**
+     * Kiểm tra xem đơn hàng đã từng hoàn thành (status 60) trước đây chưa
+     * @param orderId - ID đơn hàng
+     * @returns true nếu chưa từng có status 60 (lần đầu), false nếu đã từng có (skip)
+     */
+    private async checkIfFirstTimeStatus60(orderId: number): Promise<boolean> {
+        try {
+            // Lấy lịch sử thao tác đơn hàng
+            const historyResponse = await this.nhanhService.getOrderHistory([orderId]);
+
+            if (!historyResponse || !historyResponse.data || historyResponse.data.length === 0) {
+                // Không có lịch sử -> Coi như lần đầu (chưa từng hoàn thành)
+                logger.warn(`Order ${orderId} - No history found, treating as first time`);
+                return true;
+            }
+
+            const history = historyResponse.data;
+
+            // Kiểm tra xem đã từng có status 60 trong lịch sử chưa
+            let hasStatus60Before = false;
+
+            for (const item of history) {
+                if (item.orderId === orderId && item.status?.new === 60) {
+                    hasStatus60Before = true;
+                    break; // Tìm thấy rồi, không cần duyệt tiếp
+                }
+            }
+
+            // Nếu đã từng có status 60 -> Đã lập chứng từ rồi -> Skip
+            if (hasStatus60Before) {
+                logger.info(`Order ${orderId} - Already had status 60 before, skipping...`);
+                return false;
+            }
+
+            // Nếu chưa từng có status 60 -> Đây là lần đầu tiên -> Lập chứng từ
+            logger.info(`Order ${orderId} - First time reaching status 60, will create voucher`);
+            return true;
+
+        } catch (error: any) {
+            // Nếu lỗi khi gọi API lịch sử -> Coi như lần đầu để không bỏ sót
+            logger.error(`Order ${orderId} - Error checking history, treating as first time:`, error.message);
+            return true;
         }
     }
 

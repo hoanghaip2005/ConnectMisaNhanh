@@ -89,3 +89,40 @@ export interface OrderListResponse {
     messages?: string[];
     errorCode?: string;
 }
+
+/**
+ * Order History Request
+ */
+export interface OrderHistoryRequest {
+    filters: {
+        orderIds: number[];      // Mảng ID đơn hàng, tối đa 100
+        type?: string;           // logcarrier: Load lịch sử đơn hàng từ hãng vận chuyển
+    };
+}
+
+/**
+ * Order History Response
+ */
+export interface OrderHistoryResponse {
+    code: number;
+    paginator?: {
+        next?: string;           // Giá trị để lấy dữ liệu trang tiếp theo
+    };
+    data?: OrderHistoryItem[];
+    messages?: string[];
+}
+
+/**
+ * Order History Item
+ */
+export interface OrderHistoryItem {
+    orderId: number;             // ID đơn hàng trên Nhanh.vn
+    step: number;                // ID hành động
+    status: {
+        old: number;             // ID trạng thái cũ
+        new: number;             // ID trạng thái mới
+    };
+    createdAt: number;           // Thời gian tạo (định dạng timestamp)
+    createdById: number;         // ID người thao tác
+    createdBy: string;           // Người thao tác
+}

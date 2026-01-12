@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import { AmisService } from './amis.services';
+import logger from '../utils/logger';
 
 dotenv.config();
 
@@ -24,7 +25,7 @@ export class AmisTokenManager {
      */
     public async refreshToken(): Promise<string> {
         try {
-            console.log('🔄 Refreshing AMIS access token...');
+            logger.info('Refreshing AMIS access token...');
 
             // Lấy token mới
             const tokenData = await this.amisService.connect();
@@ -35,13 +36,14 @@ export class AmisTokenManager {
             // Cập nhật process.env
             process.env.MISA_ACCESS_TOKEN = tokenData.access_token;
 
-            console.log('✅ AMIS access token refreshed successfully');
-            console.log(`   - Token expires: ${tokenData.expired_time}`);
-            console.log(`   - Tenant: ${tokenData.tenant_code}`);
+            logger.info('AMIS access token refreshed successfully', {
+                expired_time: tokenData.expired_time,
+                tenant_code: tokenData.tenant_code
+            });
 
             return tokenData.access_token;
         } catch (error: any) {
-            console.error('❌ Failed to refresh AMIS token:', error.message);
+            logger.error('Failed to refresh AMIS token', error);
             throw error;
         }
     }
@@ -68,9 +70,9 @@ export class AmisTokenManager {
             // Ghi lại file .env
             fs.writeFileSync(this.envPath, envContent, 'utf8');
 
-            console.log(`   - Updated ${key} in .env file`);
+            logger.debug(`Updated ${key} in .env file`);
         } catch (error: any) {
-            console.error(`Failed to update .env file:`, error.message);
+            logger.error('Failed to update .env file', error);
             throw error;
         }
     }
@@ -79,11 +81,11 @@ export class AmisTokenManager {
      * Bắt đầu auto-refresh token mỗi 12 giờ
      */
     public startAutoRefresh(): void {
-        console.log('🚀 Starting AMIS token auto-refresh...');
+        logger.info('Starting AMIS token auto-refresh...');
 
         // Refresh ngay lập tức
         this.refreshToken().catch(err => {
-            console.error('Initial token refresh failed:', err.message);
+            logger.error('Initial token refresh failed', err);
         });
 
         // Refresh mỗi 12 giờ (token expire sau 12h)
@@ -92,11 +94,11 @@ export class AmisTokenManager {
 
         this.refreshInterval = setInterval(() => {
             this.refreshToken().catch(err => {
-                console.error('Scheduled token refresh failed:', err.message);
+                logger.error('Scheduled token refresh failed', err);
             });
         }, REFRESH_INTERVAL);
 
-        console.log('✅ Auto-refresh enabled (every 11 hours)');
+        logger.info('Auto-refresh enabled (every 11 hours)');
     }
 
     /**
@@ -106,7 +108,7 @@ export class AmisTokenManager {
         if (this.refreshInterval) {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
-            console.log('⏸️  Auto-refresh stopped');
+            logger.info('Auto-refresh stopped');
         }
     }
 
@@ -129,7 +131,7 @@ export class AmisTokenManager {
         let token = process.env.MISA_ACCESS_TOKEN;
 
         if (!token || token.trim() === '') {
-            console.log('⚠️  No token found, fetching new one...');
+            logger.warn('No token found, fetching new one');
             token = await this.refreshToken();
         }
 

@@ -33,6 +33,10 @@ router.get('/config', (req, res) => nhanhController.getConfig(req, res));
 // Body: { "filters": {...}, "paginator": {...}, "dataOptions": {...} }
 router.post('/orders', (req, res) => nhanhController.getOrderList(req, res));
 
+// Get order history
+// GET /api/nhanh/orders/history/:orderId
+router.get('/orders/history/:orderId', (req, res) => nhanhController.getOrderHistory(req, res));
+
 // Get retail bills
 // POST /api/nhanh/bills/retail
 // Body: { "filters": {...}, "paginator": {...}, "dataOptions": {...} }

@@ -229,6 +229,69 @@ export class NhanhService {
     }
 
     /**
+     * Lấy lịch sử thao tác đơn hàng
+     * POST /v3.0/order/history
+     * @param orderIds - Mảng ID đơn hàng (tối đa 100)
+     * @param type - Loại lịch sử (logcarrier: Load lịch sử từ hãng vận chuyển)
+     */
+    public async getOrderHistory(orderIds: number[], type?: string): Promise<any> {
+        try {
+            const accessToken = process.env.NHANH_ACCESS_TOKEN;
+            const businessId = process.env.NHANH_BUSINESS_ID;
+            const appId = this.config.appId;
+
+            if (!accessToken || !businessId) {
+                throw new Error('Missing access token or business ID');
+            }
+
+            if (!orderIds || orderIds.length === 0) {
+                throw new Error('orderIds is required');
+            }
+
+            if (orderIds.length > 100) {
+                throw new Error('Maximum 100 orderIds allowed');
+            }
+
+            const url = `${this.config.baseUrl}/v${this.config.apiVersion}/order/history`;
+
+            const payload: any = {
+                filters: {
+                    orderIds
+                }
+            };
+
+            if (type) {
+                payload.filters.type = type;
+            }
+
+            const response = await this.axiosInstance.post(
+                url,
+                payload,
+                {
+                    params: {
+                        appId,
+                        businessId
+                    },
+                    headers: {
+                        'Authorization': accessToken
+                    }
+                }
+            );
+
+            if (response.data.code === 0) {
+                throw new Error(response.data.messages?.join(', ') || 'Failed to get order history');
+            }
+
+            return response.data;
+        } catch (error: any) {
+            if (error.response) {
+                throw new Error(`Nhanh API Error: ${error.response?.data?.messages?.join(', ') || error.message}`);
+            }
+            throw error;
+        }
+    }
+
+    /**
      * Lấy danh sách hóa đơn bán lẻ
      */
     public async getRetailBills(request: any): Promise<any> {

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import logger from '../utils/logger';
 import {
     AmisConnectRequest,
     AmisConnectResponse,
@@ -125,8 +126,7 @@ export class AmisService {
             }
 
             if (process.env.NODE_ENV === 'development') {
-                console.log('✅ Voucher sent to AMIS successfully');
-                console.log('Response:', response.data.Data);
+                logger.info('Voucher sent to AMIS successfully', response.data.Data);
             }
 
             return response.data;
@@ -179,7 +179,7 @@ export class AmisService {
             }
 
             if (process.env.NODE_ENV === 'development') {
-                console.log(`✅ Deleted ${orgRefIds.length} vouchers from AMIS`);
+                logger.info(`Deleted ${orgRefIds.length} vouchers from AMIS`);
             }
 
             return response.data;
@@ -216,7 +216,7 @@ export class AmisService {
             }
 
             if (process.env.NODE_ENV === 'development') {
-                console.log('✅ Callback history retrieved');
+                logger.info('Callback history retrieved');
             }
 
             return response.data;
@@ -264,11 +264,12 @@ export class AmisService {
     public async processCallback(callbackData: CallbackDataInput): Promise<void> {
         // Log thông tin callback nhận được
         if (process.env.NODE_ENV === 'development') {
-            console.log('=== AMIS Callback Received ===');
-            console.log('App ID:', callbackData.app_id);
-            console.log('Data Type:', callbackData.data_type);
-            console.log('Org Company Code:', callbackData.org_company_code);
-            console.log('Success:', callbackData.success);
+            logger.webhook('AMIS Callback Received', {
+                app_id: callbackData.app_id,
+                data_type: callbackData.data_type,
+                org_company_code: callbackData.org_company_code,
+                success: callbackData.success
+            });
         }
 
         // Parse data từ JSON string
@@ -276,7 +277,7 @@ export class AmisService {
         try {
             details = JSON.parse(callbackData.data);
         } catch (error) {
-            console.error('Failed to parse callback data:', error);
+            logger.error('Failed to parse callback data', error);
             return;
         }
 
@@ -289,7 +290,7 @@ export class AmisService {
                 await this.handleDeleteVoucherCallback(details);
                 break;
             default:
-                console.log('Unhandled callback type:', callbackData.data_type);
+                logger.warn('Unhandled callback type', { type: callbackData.data_type });
         }
     }
 
@@ -298,20 +299,22 @@ export class AmisService {
      * @param details - Chi tiết các voucher
      */
     private async handleSaveVoucherCallback(details: CallbackDataDetail[]): Promise<void> {
-        console.log('=== Processing SaveVoucher Callback ===');
+        logger.info('Processing SaveVoucher Callback');
 
         for (const detail of details) {
             if (detail.success) {
-                console.log(`✅ Voucher saved successfully:`);
-                console.log(`   - Org RefID: ${detail.org_refid}`);
-                console.log(`   - Session ID: ${detail.session_id}`);
-                console.log(`   - Voucher Type: ${detail.voucher_type}`);
+                logger.info('Voucher saved successfully', {
+                    org_refid: detail.org_refid,
+                    session_id: detail.session_id,
+                    voucher_type: detail.voucher_type
+                });
             } else {
-                console.error(`❌ Voucher save failed:`);
-                console.error(`   - Org RefID: ${detail.org_refid}`);
-                console.error(`   - Error Code: ${detail.error_code}`);
-                console.error(`   - Error Message: ${detail.error_message}`);
-                console.error(`   - Session ID: ${detail.session_id}`);
+                logger.error('Voucher save failed', {
+                    org_refid: detail.org_refid,
+                    error_code: detail.error_code,
+                    error_message: detail.error_message,
+                    session_id: detail.session_id
+                });
             }
         }
     }
@@ -321,16 +324,18 @@ export class AmisService {
      * @param details - Chi tiết các voucher
      */
     private async handleDeleteVoucherCallback(details: CallbackDataDetail[]): Promise<void> {
-        console.log('=== Processing DeleteVoucher Callback ===');
+        logger.info('Processing DeleteVoucher Callback');
 
         for (const detail of details) {
             if (detail.success) {
-                console.log(`✅ Voucher deleted successfully:`);
-                console.log(`   - Org RefID: ${detail.org_refid}`);
+                logger.info('Voucher deleted successfully', {
+                    org_refid: detail.org_refid
+                });
             } else {
-                console.error(`❌ Voucher delete failed:`);
-                console.error(`   - Org RefID: ${detail.org_refid}`);
-                console.error(`   - Error: ${detail.error_message}`);
+                logger.error('Voucher delete failed', {
+                    org_refid: detail.org_refid,
+                    error_message: detail.error_message
+                });
             }
         }
     }

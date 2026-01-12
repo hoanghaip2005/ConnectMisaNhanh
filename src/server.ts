@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import apiRoutes from './routes/api.routes';
 import amisTokenManager from './services/amis-token-manager.services';
+import logger from './utils/logger';
 
 // Load config
 dotenv.config();
@@ -27,17 +28,20 @@ app.use('/api', apiRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
+    const isProduction = process.env.NODE_ENV === 'production';
+
     res.status(200).json({
         success: true,
         message: 'Middleware Integration API',
         version: '1.0.0',
-        endpoints: {
-            health: '/api/health',
-            nhanhOAuthInitiate: '/api/nhanh/oauth/initiate?returnUrl=YOUR_HTTPS_URL',
-            nhanhOAuthCallback: '/api/nhanh/oauth/callback?accessCode=CODE',
-            nhanhCheckToken: '/api/nhanh/oauth/check',
-            nhanhConfig: '/api/nhanh/config'
-        }
+        status: 'running',
+        // ❌ Only show endpoints in development
+        ...(isProduction ? {} : {
+            endpoints: {
+                health: '/api/health',
+                docs: '/api/docs'
+            }
+        })
     });
 });
 
@@ -51,17 +55,29 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    // Logger sẽ tự động sanitize và xử lý production/development mode
+    logger.error('Request error', {
+        error: err,
+        path: req.path,
+        method: req.method
+    });
+
     res.status(err.status || 500).json({
         success: false,
-        message: err.message || 'Internal server error'
+        message: isProduction ? 'Internal server error' : err.message,
+        // ❌ Only show stack in development
+        ...(isProduction ? {} : {
+            error: err.message,
+            stack: err.stack
+        })
     });
 });
 
 // Start server
 app.listen(PORT, () => {
-    if (process.env.NODE_ENV === 'development') {
-        console.log(`Server running on port ${PORT}`);
-    }
+    logger.info(`Server running on port ${PORT}`);
 
     // Start AMIS token auto-refresh
     amisTokenManager.startAutoRefresh();

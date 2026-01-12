@@ -1,5 +1,10 @@
 import { Router } from 'express';
 import webhookController from '../controllers/webhook.controller';
+import {
+    webhookRateLimiter,
+    validateWebhookRequest,
+    replayProtection
+} from '../middleware/security.middleware';
 
 const router = Router();
 
@@ -12,16 +17,23 @@ const router = Router();
  * POST /api/webhooks/nhanh
  * Main webhook endpoint to receive events from Nhanh.vn
  * 
+ * Security layers:
+ * 1. Rate limiting (1000 req/min, skip trusted IPs)
+ * 2. Request validation (event, businessId, data)
+ * 3. Replay protection (chặn duplicate requests)
+ * 4. Signature verification (trong controller)
+ * 
  * Supported events:
- * - order.created: New order created
- * - order.updated: Order details updated
- * - order.cancelled: Order cancelled
- * - order.confirmed: Order confirmed
- * - order.packed: Order packed
- * - order.shipped: Order shipped
- * - order.delivered: Order delivered
+ * - orderAdd: New order created
+ * - orderUpdate: Order details updated
  */
-router.post('/nhanh', (req, res) => webhookController.handleWebhook(req, res));
+router.post(
+    '/nhanh',
+    webhookRateLimiter,        // Layer 1: Rate limiting
+    validateWebhookRequest,     // Layer 2: Request validation
+    replayProtection,           // Layer 3: Replay attack protection
+    (req, res) => webhookController.handleWebhook(req, res) // Layer 4: Signature + Processing
+);
 
 /**
  * GET /api/webhooks/status

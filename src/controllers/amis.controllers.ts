@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AmisService } from '../services/amis.services';
 import { CallbackDataInput, CallbackDataOutput, SaVoucher } from '../types/amis.types';
 import amisTokenManager from '../services/amis-token-manager.services';
+import logger from '../utils/logger';
 
 const amisService = new AmisService();
 
@@ -14,7 +15,7 @@ export const connectToAmis = async (req: Request, res: Response) => {
             data: tokenData
         });
     } catch (error: any) {
-        console.error('AMIS connect error:', error.message);
+        logger.error('AMIS connect error', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -36,7 +37,7 @@ export const refreshToken = async (req: Request, res: Response) => {
             token: token.substring(0, 20) + '...' // Chỉ hiện một phần token
         });
     } catch (error: any) {
-        console.error('Refresh token error:', error.message);
+        logger.error('Refresh token error', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -58,7 +59,7 @@ export const getCurrentToken = async (req: Request, res: Response) => {
             hasToken: !!token
         });
     } catch (error: any) {
-        console.error('Get token error:', error.message);
+        logger.error('Get token error', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -87,8 +88,9 @@ export const handleAmisCallback = async (req: Request, res: Response) => {
             result.ErrorMessage = 'Signature invalid';
 
             // Log cảnh báo bảo mật
-            console.warn('⚠️ Invalid callback signature detected');
-            console.warn('Received from:', req.ip);
+            logger.security('Invalid callback signature detected', {
+                ip: req.ip
+            });
 
             return res.json(result);
         }
@@ -99,7 +101,7 @@ export const handleAmisCallback = async (req: Request, res: Response) => {
             try {
                 await amisService.processCallback(callbackData);
             } catch (error: any) {
-                console.error('Error processing callback:', error.message);
+                logger.error('Error processing callback', error);
             }
         });
 
@@ -111,7 +113,7 @@ export const handleAmisCallback = async (req: Request, res: Response) => {
         result.ErrorCode = 'Exception';
         result.ErrorMessage = error.message;
 
-        console.error('Callback handler error:', error.message);
+        logger.error('Callback handler error', error);
         res.json(result);
     }
 };
@@ -133,7 +135,7 @@ export const saveVoucher = async (req: Request, res: Response) => {
 
         // Nếu không truyền access_token, lấy từ token manager
         if (!access_token) {
-            console.log('No access_token provided, using token from manager...');
+            logger.debug('No access_token provided, using token from manager');
             access_token = await amisTokenManager.getValidToken();
         }
 
@@ -144,7 +146,7 @@ export const saveVoucher = async (req: Request, res: Response) => {
             data: result
         });
     } catch (error: any) {
-        console.error('Save voucher error:', error.message);
+        logger.error('Save voucher error', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -178,7 +180,7 @@ export const checkCallbackHistory = async (req: Request, res: Response) => {
                     };
                 });
             } catch (parseError) {
-                console.error('Parse callback data error:', parseError);
+                logger.error('Parse callback data error', parseError);
             }
         }
 
@@ -190,7 +192,7 @@ export const checkCallbackHistory = async (req: Request, res: Response) => {
             }
         });
     } catch (error: any) {
-        console.error('Check callback history error:', error.message);
+        logger.error('Check callback history error', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -232,7 +234,7 @@ export const deleteVoucher = async (req: Request, res: Response) => {
             data: result
         });
     } catch (error: any) {
-        console.error('Delete voucher error:', error.message);
+        logger.error('Delete voucher error', error);
         res.status(500).json({
             success: false,
             error: error.message

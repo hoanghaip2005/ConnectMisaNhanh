@@ -69,19 +69,22 @@ export class NhanhController {
             const tokenResponse = await nhanhService.getAccessToken(accessCode);
 
             if (tokenResponse.code === 1 && tokenResponse.data) {
+                // ✅ SECURITY: Never expose accessToken in response
+                const isProduction = process.env.NODE_ENV === 'production';
+
                 res.status(200).json({
                     success: true,
                     data: {
-                        accessToken: tokenResponse.data.accessToken,
-                        businessId: tokenResponse.data.businessId,
-                        expiredAt: tokenResponse.data.expiredAt,
-                        expiryDate: new Date(tokenResponse.data.expiredAt * 1000).toISOString(),
-                        permissions: tokenResponse.data.permissions,
-                        depotIds: tokenResponse.data.depotIds,
-                        pageIds: tokenResponse.data.pageIds,
+                        // ❌ DO NOT return accessToken (security risk!)
+                        ...(isProduction ? {} : {
+                            accessToken: tokenResponse.data.accessToken  // Only in dev
+                        }),
+                        tokenReceived: true,
+                        expiresAt: new Date(tokenResponse.data.expiredAt * 1000).toISOString(),
+                        permissionsGranted: tokenResponse.data.permissions?.length || 0,
                         version: tokenResponse.data.version
                     },
-                    message: 'Access token retrieved successfully'
+                    message: 'Access token retrieved and saved successfully'
                 });
             } else {
                 res.status(400).json({
@@ -319,6 +322,81 @@ export class NhanhController {
             res.status(500).json({
                 success: false,
                 message: error.message || 'Failed to process retail bill'
+            });
+        }
+    }
+
+    /**
+     * Lấy lịch sử thao tác đơn hàng
+     * GET /api/nhanh/orders/history/:orderId
+     */
+    public async getOrderHistory(req: Request, res: Response): Promise<void> {
+        try {
+            const orderId = parseInt(req.params.orderId);
+
+            if (!orderId || isNaN(orderId)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid order ID'
+                });
+                return;
+            }
+
+            const historyResponse = await nhanhService.getOrderHistory([orderId]);
+
+            if (historyResponse.code === 1) {
+                // Phân tích lịch sử
+                const history = historyResponse.data || [];
+                
+                // Kiểm tra xem đã từng có status 60 chưa
+                const hasStatus60Before = history.some((item: any) => 
+                    item.orderId === orderId && item.status?.new === 60
+                );
+
+                // Đếm số lần chuyển sang status 60
+                const status60Count = history.filter((item: any) => 
+                    item.orderId === orderId && item.status?.new === 60
+                ).length;
+
+                // Tìm lần đầu tiên chuyển sang status 60 (event cuối cùng trong mảng)
+                const status60Events = history.filter((item: any) => 
+                    item.orderId === orderId && item.status?.new === 60
+                );
+                const firstStatus60 = status60Events.length > 0 ? status60Events[status60Events.length - 1] : null;
+
+                res.status(200).json({
+                    success: true,
+                    orderId,
+                    data: {
+                        history,
+                        analysis: {
+                            totalEvents: history.length,
+                            status60Count,
+                            hasStatus60Before,
+                            shouldCreateVoucher: !hasStatus60Before, // Chỉ tạo nếu chưa từng có
+                            firstStatus60Event: firstStatus60 ? {
+                                createdAt: new Date(firstStatus60.createdAt * 1000).toISOString(),
+                                createdBy: firstStatus60.createdBy,
+                                oldStatus: firstStatus60.status?.old,
+                                newStatus: firstStatus60.status?.new
+                            } : null,
+                            note: hasStatus60Before 
+                                ? `Đã từng hoàn thành ${status60Count} lần → Skip (không tạo chứng từ)`
+                                : 'Chưa từng hoàn thành → Sẽ tạo chứng từ'
+                        }
+                    },
+                    message: 'Order history retrieved successfully'
+                });
+            } else {
+                res.status(400).json({
+                    success: false,
+                    message: historyResponse.messages?.join(', ') || 'Failed to get order history'
+                });
+            }
+        } catch (error: any) {
+            res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get order history'
             });
         }
     }
