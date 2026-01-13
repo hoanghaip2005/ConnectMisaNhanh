@@ -347,19 +347,19 @@ export class NhanhController {
             if (historyResponse.code === 1) {
                 // Phân tích lịch sử
                 const history = historyResponse.data || [];
-                
+
                 // Kiểm tra xem đã từng có status 60 chưa
-                const hasStatus60Before = history.some((item: any) => 
+                const hasStatus60Before = history.some((item: any) =>
                     item.orderId === orderId && item.status?.new === 60
                 );
 
                 // Đếm số lần chuyển sang status 60
-                const status60Count = history.filter((item: any) => 
+                const status60Count = history.filter((item: any) =>
                     item.orderId === orderId && item.status?.new === 60
                 ).length;
 
                 // Tìm lần đầu tiên chuyển sang status 60 (event cuối cùng trong mảng)
-                const status60Events = history.filter((item: any) => 
+                const status60Events = history.filter((item: any) =>
                     item.orderId === orderId && item.status?.new === 60
                 );
                 const firstStatus60 = status60Events.length > 0 ? status60Events[status60Events.length - 1] : null;
@@ -380,7 +380,7 @@ export class NhanhController {
                                 oldStatus: firstStatus60.status?.old,
                                 newStatus: firstStatus60.status?.new
                             } : null,
-                            note: hasStatus60Before 
+                            note: hasStatus60Before
                                 ? `Đã từng hoàn thành ${status60Count} lần → Skip (không tạo chứng từ)`
                                 : 'Chưa từng hoàn thành → Sẽ tạo chứng từ'
                         }
