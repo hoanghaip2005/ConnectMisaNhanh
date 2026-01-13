@@ -232,73 +232,50 @@ class WebhookController {
      */
     private async checkIfFirstTimeStatus60(orderId: number): Promise<boolean> {
         try {
-            // Lấy chi tiết đơn hàng để biết status hiện tại
-            const orderResponse = await this.nhanhService.getOrder(orderId);
-
-            if (!orderResponse || !orderResponse.data) {
-                logger.warn(`Order ${orderId} - Cannot get order details, treating as first time`);
-                return true;
-            }
-
-            const currentStatus = orderResponse.data.info.status;
-
             // Lấy lịch sử thao tác đơn hàng
             const historyResponse = await this.nhanhService.getOrderHistory([orderId]);
 
             if (!historyResponse || !historyResponse.data || historyResponse.data.length === 0) {
                 // Không có lịch sử -> Coi như lần đầu (chưa từng hoàn thành)
-                logger.warn(`Order ${orderId} - No history found, treating as first time`);
+                logger.info(`Order ${orderId} - No history found, treating as first time`);
                 return true;
             }
 
             const history = historyResponse.data;
 
-            // Đếm số lần status 60 xuất hiện trong lịch sử
-            let status60Count = 0;
+            // ✅ Logic mới: Kiểm tra xem đã từng RỜI KHỎI status 60 chưa
+            // Tức là kiểm tra có bản ghi nào có OLD status = 60 không
+            // - Nếu có OLD status = 60 → Đã từng ở status 60 rồi và đã chuyển sang status khác → Đã lập chứng từ rồi
+            // - Nếu không có OLD status = 60 → Chưa từng ở status 60, hoặc đang ở lần đầu → Lập chứng từ
+
+            let hasLeftStatus60Before = false;
 
             for (const item of history) {
-                if (item.orderId === orderId && item.status?.new === 60) {
-                    status60Count++;
+                if (item.orderId === orderId && item.status?.old === 60) {
+                    // Tìm thấy bản ghi có OLD status = 60
+                    // → Đơn hàng đã từng ở status 60 và đã chuyển sang status khác
+                    hasLeftStatus60Before = true;
+                    logger.info(`Order ${orderId} - Found history with OLD status 60 (status changed from 60 to ${item.status.new}), already processed before`);
+                    break;
                 }
             }
 
-            // ✅ Logic kiểm tra:
-            // Case 1: Chưa từng có status 60 trong lịch sử -> Lần đầu
-            if (status60Count === 0) {
-                logger.info(`Order ${orderId} - First time reaching status 60 (no history), will create voucher`);
-                return true;
-            }
-
-            // Case 2: Đã có status 60 trong lịch sử
-            // - Nếu status hiện tại KHÔNG phải 60 -> Đã lập chứng từ rồi và chuyển status khác -> Skip
-            // - Nếu status hiện tại = 60 và có 1 lần trong lịch sử -> Lần đầu (lần hiện tại) -> Xử lý
-            // - Nếu status hiện tại = 60 và có >= 2 lần -> Đã xử lý trước đó -> Skip
-
-            if (currentStatus !== 60) {
-                // Đơn hàng đã qua status 60 và chuyển sang status khác
-                logger.info(`Order ${orderId} - Already processed (had status 60, now status ${currentStatus}), skipping...`);
+            if (hasLeftStatus60Before) {
+                // Đã từng ở status 60 và đã chuyển sang status khác → Skip
+                logger.info(`Order ${orderId} - Already processed before (had left status 60), skipping...`);
                 return false;
             }
 
-            // Status hiện tại = 60
-            if (status60Count >= 2) {
-                // Đã có >= 2 lần status 60 -> Đã xử lý rồi
-                logger.info(`Order ${orderId} - Status 60 appeared ${status60Count} times, already processed before, skipping...`);
-                return false;
-            }
-
-            // Status hiện tại = 60 và chỉ có 1 lần trong lịch sử -> Lần đầu
-            logger.info(`Order ${orderId} - First time reaching status 60 (count: ${status60Count}, current: ${currentStatus}), will create voucher`);
+            // Chưa từng rời khỏi status 60 → Lần đầu tiên đạt status 60 → Lập chứng từ
+            logger.info(`Order ${orderId} - First time reaching status 60 (never left status 60 before), will create voucher`);
             return true;
 
         } catch (error: any) {
-            // Nếu lỗi khi gọi API lịch sử -> Coi như lần đầu để không bỏ sót
+            // Nếu lỗi khi gọi API lịch sử → Coi như lần đầu để không bỏ sót
             logger.error(`Order ${orderId} - Error checking history, treating as first time:`, error.message);
             return true;
         }
-    }
-
-    /**
+    }    /**
      * Get webhook status and configuration
      * GET /api/webhooks/status
      */
