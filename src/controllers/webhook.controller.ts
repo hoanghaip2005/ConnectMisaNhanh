@@ -30,11 +30,11 @@ class WebhookController {
     private verifySignature(payload: string, signature: string | undefined): boolean {
         // ✅ Luôn cho phép webhook từ Nhanh.vn
         // Vì Nhanh.vn không gửi X-Nhanh-Signature header
-        
+
         if (process.env.NODE_ENV === 'development') {
             logger.debug('[WEBHOOK SECURITY] Signature validation disabled (Nhanh.vn does not send signature)');
         }
-        
+
         return true; // Luôn accept webhook
     }
 

@@ -8,6 +8,16 @@ const isProduction = process.env.NODE_ENV === 'production';
 const isTest = process.env.NODE_ENV === 'test';
 
 /**
+ * Get current time in Vietnam timezone (UTC+7)
+ */
+function getVietnamTime(): string {
+    const now = new Date();
+    // Convert to Vietnam timezone (UTC+7)
+    const vietnamTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+    return vietnamTime.toISOString().replace('Z', '+07:00');
+}
+
+/**
  * Danh sách các key nhạy cảm cần che dấu
  */
 const SENSITIVE_KEYS = [
@@ -73,7 +83,7 @@ class Logger {
      */
     debug(...args: any[]): void {
         if (isDevelopment && !isTest) {
-            console.log('[DEBUG]', new Date().toISOString(), ...args);
+            console.log('[DEBUG]', getVietnamTime(), ...args);
         }
     }
 
@@ -85,11 +95,11 @@ class Logger {
         if (isTest) return;
 
         if (data && isProduction) {
-            console.log('[INFO]', new Date().toISOString(), message, sanitizeObject(data));
+            console.log('[INFO]', getVietnamTime(), message, sanitizeObject(data));
         } else if (data) {
-            console.log('[INFO]', new Date().toISOString(), message, data);
+            console.log('[INFO]', getVietnamTime(), message, data);
         } else {
-            console.log('[INFO]', new Date().toISOString(), message);
+            console.log('[INFO]', getVietnamTime(), message);
         }
     }
 
@@ -101,11 +111,11 @@ class Logger {
         if (isTest) return;
 
         if (data && isProduction) {
-            console.warn('[WARN]', new Date().toISOString(), message, sanitizeObject(data));
+            console.warn('[WARN]', getVietnamTime(), message, sanitizeObject(data));
         } else if (data) {
-            console.warn('[WARN]', new Date().toISOString(), message, data);
+            console.warn('[WARN]', getVietnamTime(), message, data);
         } else {
-            console.warn('[WARN]', new Date().toISOString(), message);
+            console.warn('[WARN]', getVietnamTime(), message);
         }
     }
 
@@ -118,14 +128,14 @@ class Logger {
 
         if (isProduction) {
             // Production: Không show stack trace
-            console.error('[ERROR]', new Date().toISOString(), message, {
+            console.error('[ERROR]', getVietnamTime(), message, {
                 message: error?.message || 'Unknown error',
                 code: error?.code,
                 statusCode: error?.statusCode
             });
         } else {
             // Development: Show full error
-            console.error('[ERROR]', new Date().toISOString(), message, error);
+            console.error('[ERROR]', getVietnamTime(), message, error);
         }
     }
 
@@ -135,9 +145,9 @@ class Logger {
      */
     sensitive(label: string, data: any): void {
         if (isDevelopment) {
-            console.log('[SENSITIVE]', new Date().toISOString(), label, data);
+            console.log('[SENSITIVE]', getVietnamTime(), label, data);
         } else {
-            console.log('[SENSITIVE]', new Date().toISOString(), label, '[REDACTED]');
+            console.log('[SENSITIVE]', getVietnamTime(), label, '[REDACTED]');
         }
     }
 
@@ -147,9 +157,9 @@ class Logger {
      */
     webhook(event: string, data: any): void {
         if (isDevelopment) {
-            console.log('[WEBHOOK]', new Date().toISOString(), event, JSON.stringify(data, null, 2));
+            console.log('[WEBHOOK]', getVietnamTime(), event, JSON.stringify(data, null, 2));
         } else {
-            console.log('[WEBHOOK]', new Date().toISOString(), event, '[PAYLOAD REDACTED]');
+            console.log('[WEBHOOK]', getVietnamTime(), event, '[PAYLOAD REDACTED]');
         }
     }
 
@@ -159,9 +169,9 @@ class Logger {
      */
     security(event: string, details?: any): void {
         if (isDevelopment && details) {
-            console.log('[SECURITY]', new Date().toISOString(), event, details);
+            console.log('[SECURITY]', getVietnamTime(), event, details);
         } else {
-            console.log('[SECURITY]', new Date().toISOString(), event);
+            console.log('[SECURITY]', getVietnamTime(), event);
         }
     }
 }
