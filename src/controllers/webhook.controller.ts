@@ -25,57 +25,17 @@ class WebhookController {
 
     /**
      * Verify webhook signature for security
-     * OPTIONAL: Nếu có signature và secretKey thì verify, không có thì skip
+     * Note: Nhanh.vn không gửi signature header, nên logic này được disable
      */
     private verifySignature(payload: string, signature: string | undefined): boolean {
-        const secretKey = process.env.NHANH_WEBHOOK_SECRET;
-
-        // ℹ️ Nếu không có secret key -> Skip validation (cho phép tất cả)
-        if (!secretKey) {
-            logger.warn('[WEBHOOK SECURITY] NHANH_WEBHOOK_SECRET not configured - skipping signature validation');
-            return true; // Cho phép webhook không có signature
+        // ✅ Luôn cho phép webhook từ Nhanh.vn
+        // Vì Nhanh.vn không gửi X-Nhanh-Signature header
+        
+        if (process.env.NODE_ENV === 'development') {
+            logger.debug('[WEBHOOK SECURITY] Signature validation disabled (Nhanh.vn does not send signature)');
         }
-
-        // ℹ️ Nếu không có signature nhưng có secret key -> Vẫn cho phép (Nhanh.vn không gửi signature)
-        if (!signature) {
-            logger.warn('[WEBHOOK SECURITY] No signature provided - accepting webhook without validation');
-            return true; // Cho phép webhook không có signature
-        }
-
-
-        // ✅ Nếu có cả signature và secret key -> Verify
-        try {
-            const expectedSignature = crypto
-                .createHmac('sha256', secretKey)
-                .update(payload)
-                .digest('hex');
-
-            // Kiểm tra độ dài trước - tránh lỗi timingSafeEqual
-            if (signature.length !== expectedSignature.length) {
-                logger.error('[WEBHOOK SECURITY] Signature length mismatch', {
-                    received: signature.length,
-                    expected: expectedSignature.length
-                });
-                return false;
-            }
-
-            // Sử dụng timingSafeEqual để tránh timing attack
-            const isValid = crypto.timingSafeEqual(
-                Buffer.from(signature),
-                Buffer.from(expectedSignature)
-            );
-
-            if (isValid) {
-                logger.info('[WEBHOOK SECURITY] Signature verified successfully');
-            } else {
-                logger.error('[WEBHOOK SECURITY] Signature mismatch');
-            }
-
-            return isValid;
-        } catch (error) {
-            logger.error('[WEBHOOK SECURITY] Signature verification error:', error);
-            return false;
-        }
+        
+        return true; // Luôn accept webhook
     }
 
     /**
@@ -96,24 +56,6 @@ class WebhookController {
                     businessId,
                     data: event === 'orderAdd' || event === 'orderUpdate' ? data : undefined
                 });
-            }
-
-            // ✅ BẮT BUỘC verify signature trước khi xử lý
-            const signature = req.headers['x-nhanh-signature'] as string | undefined;
-            const isValid = this.verifySignature(JSON.stringify(req.body), signature);
-
-            if (!isValid) {
-                logger.security('Invalid or missing webhook signature', {
-                    hasSignature: !!signature,
-                    hasSecret: !!process.env.NHANH_WEBHOOK_SECRET,
-                    event: event
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized: Invalid or missing webhook signature'
-                });
-                return;
             }
 
             // TRẢ VỀ RESPONSE NGAY LẬP TỨC (< 1 giây)
