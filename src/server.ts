@@ -19,12 +19,65 @@ app.use(cors({
     credentials: true
 }));
 
-// Middleware parser
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Middleware parser with error handling
+app.use(express.json({
+    verify: (req, res, buf, encoding) => {
+        // Store raw body for signature verification if needed
+        (req as any).rawBody = buf.toString(encoding as BufferEncoding || 'utf8');
+    },
+    limit: '10mb'
+}));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// JSON parsing error handler
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && 'body' in err && (err as any).status === 400) {
+        // JSON parsing error - Log but don't expose details
+        logger.warn('Invalid JSON received', {
+            path: req.path,
+            method: req.method,
+            ip: req.ip || req.socket.remoteAddress,
+            body: typeof err.body === 'string' ? err.body.substring(0, 100) : 'invalid'
+        });
+        
+        return res.status(400).json({
+            success: false,
+            error: 'Bad Request',
+            message: 'Invalid JSON format'
+        });
+    }
+    next(err);
+});
 
 // API Routes
 app.use('/api', apiRoutes);
+
+// Block common scanner/bot paths
+const blockedPaths = [
+    '/_bulk',
+    '/_search',
+    '/api/_bulk',
+    '/elasticsearch',
+    '/.env',
+    '/admin',
+    '/wp-admin',
+    '/phpmyadmin',
+    '/console'
+];
+
+app.use(blockedPaths, (req, res) => {
+    logger.security('Blocked scanner request', {
+        path: req.path,
+        method: req.method,
+        ip: req.ip || req.socket.remoteAddress,
+        userAgent: req.get('user-agent')
+    });
+    
+    res.status(404).json({
+        success: false,
+        message: 'Not found'
+    });
+});
 
 // Root endpoint
 app.get('/', (req, res) => {
