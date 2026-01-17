@@ -226,9 +226,21 @@ class WebhookController {
     }
 
     /**
-     * Kiểm tra xem đơn hàng đã từng hoàn thành (status 60) trước đây chưa
+     * Kiểm tra xem đơn hàng có nên tạo chứng từ không
+     * 
+     * Logic: Webhook đến với status 60
+     * - Bỏ qua record MỚI NHẤT (do webhook này tạo ra)
+     * - Check các record CŨ HƠN: Đã có NEW=60 chưa?
+     * - CHƯA có → CREATE (lần đầu)
+     * - ĐÃ có → SKIP (đã lập rồi)
+     * 
+     * Ví dụ:
+     * - History: [54→60 (latest), undefined→54] → CREATE (chỉ có 1 record NEW=60)
+     * - History: [undefined→undefined (latest), 54→60, ...] → SKIP (đã có NEW=60 trước đó)
+     * - History: [54→60 (latest), 56→60, ...] → SKIP (đã có NEW=60 trước đó)
+     * 
      * @param orderId - ID đơn hàng
-     * @returns true nếu chưa từng có status 60 (lần đầu), false nếu đã từng có (skip)
+     * @returns true nếu nên tạo chứng từ, false nếu skip
      */
     private async checkIfFirstTimeStatus60(orderId: number): Promise<boolean> {
         try {
@@ -236,43 +248,38 @@ class WebhookController {
             const historyResponse = await this.nhanhService.getOrderHistory([orderId]);
 
             if (!historyResponse || !historyResponse.data || historyResponse.data.length === 0) {
-                // Không có lịch sử -> Coi như lần đầu (chưa từng hoàn thành)
-                logger.info(`Order ${orderId} - No history found, treating as first time`);
+                // Không có lịch sử -> CREATE (fail-safe, không bỏ sót)
+                logger.info(`Order ${orderId} - No history. CREATE (fail-safe)`);
                 return true;
             }
 
-            const history = historyResponse.data;
+            // Sắp xếp theo thời gian giảm dần (mới nhất trước)
+            const sortedHistory = historyResponse.data.sort((a: any, b: any) => b.createdAt - a.createdAt);
 
-            // ✅ Logic mới: Kiểm tra xem đã từng RỜI KHỎI status 60 chưa
-            // Tức là kiểm tra có bản ghi nào có OLD status = 60 không
-            // - Nếu có OLD status = 60 → Đã từng ở status 60 rồi và đã chuyển sang status khác → Đã lập chứng từ rồi
-            // - Nếu không có OLD status = 60 → Chưa từng ở status 60, hoặc đang ở lần đầu → Lập chứng từ
+            // Bỏ qua record MỚI NHẤT (do webhook này tạo ra)
+            // Check các record CŨ HƠN: Đã có NEW=60 chưa?
+            const olderRecords = sortedHistory.slice(1);
 
-            let hasLeftStatus60Before = false;
-
-            for (const item of history) {
-                if (item.orderId === orderId && item.status?.old === 60) {
-                    // Tìm thấy bản ghi có OLD status = 60
-                    // → Đơn hàng đã từng ở status 60 và đã chuyển sang status khác
-                    hasLeftStatus60Before = true;
-                    logger.info(`Order ${orderId} - Found history with OLD status 60 (status changed from 60 to ${item.status.new}), already processed before`);
-                    break;
-                }
+            if (olderRecords.length === 0) {
+                // Chỉ có 1 record (record mới nhất) -> Lần đầu
+                logger.info(`Order ${orderId} - Only 1 record in history. CREATE (first time)`);
+                return true;
             }
 
-            if (hasLeftStatus60Before) {
-                // Đã từng ở status 60 và đã chuyển sang status khác → Skip
-                logger.info(`Order ${orderId} - Already processed before (had left status 60), skipping...`);
+            const hasStatus60Before = olderRecords.some((item: any) => item.status?.new === 60);
+
+            if (hasStatus60Before) {
+                logger.info(`Order ${orderId} - Found NEW=60 in older records. SKIP (already processed)`);
                 return false;
             }
 
-            // Chưa từng rời khỏi status 60 → Lần đầu tiên đạt status 60 → Lập chứng từ
-            logger.info(`Order ${orderId} - First time reaching status 60 (never left status 60 before), will create voucher`);
+            // Chưa có NEW=60 trong các record cũ hơn → CREATE
+            logger.info(`Order ${orderId} - No NEW=60 in older records. CREATE voucher (first time)`);
             return true;
 
         } catch (error: any) {
-            // Nếu lỗi khi gọi API lịch sử → Coi như lần đầu để không bỏ sót
-            logger.error(`Order ${orderId} - Error checking history, treating as first time:`, error.message);
+            // Nếu lỗi → Fail-safe: CREATE (không bỏ sót đơn)
+            logger.error(`Order ${orderId} - Error checking history, CREATE (fail-safe):`, error.message);
             return true;
         }
     }    /**
