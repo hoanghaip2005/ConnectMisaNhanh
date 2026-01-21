@@ -270,7 +270,7 @@ export class NhanhController {
      */
     public async processRetailBill(req: Request, res: Response): Promise<void> {
         try {
-            const billId = parseInt(req.params.billId);
+            const billId = parseInt(String(req.params.billId));
 
             if (!billId || isNaN(billId)) {
                 res.status(400).json({
@@ -332,7 +332,7 @@ export class NhanhController {
      */
     public async getOrderHistory(req: Request, res: Response): Promise<void> {
         try {
-            const orderId = parseInt(req.params.orderId);
+            const orderId = parseInt(String(req.params.orderId));
 
             if (!orderId || isNaN(orderId)) {
                 res.status(400).json({

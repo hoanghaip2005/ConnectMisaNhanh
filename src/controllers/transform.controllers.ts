@@ -19,7 +19,7 @@ class TransformController {
      */
     public async transformById(req: Request, res: Response): Promise<void> {
         try {
-            const orderId = parseInt(req.params.id);
+            const orderId = parseInt(String(req.params.id));
 
             if (!orderId || isNaN(orderId)) {
                 res.status(400).json({
@@ -75,7 +75,7 @@ class TransformController {
      */
     public async exportOrderCSV(req: Request, res: Response): Promise<void> {
         try {
-            const orderId = parseInt(req.params.id);
+            const orderId = parseInt(String(req.params.id));
 
             if (!orderId || isNaN(orderId)) {
                 res.status(400).json({

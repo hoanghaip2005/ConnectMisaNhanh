@@ -10,7 +10,7 @@ import logger from '../utils/logger';
  */
 export const testMapOrder = async (req: Request, res: Response) => {
     try {
-        const orderId = parseInt(req.params.orderId);
+        const orderId = parseInt(String(req.params.orderId));
 
         // 1. Lấy order từ Nhanh.vn
         const response = await nhanhService.getOrderList({
