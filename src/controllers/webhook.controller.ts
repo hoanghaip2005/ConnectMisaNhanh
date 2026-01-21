@@ -44,7 +44,7 @@ class WebhookController {
      * POST /api/webhooks/nhanh
      * 
      * IMPORTANT: Trả về response ngay lập tức để tránh timeout
-     * Xử lý order trong background
+     * Lưu vào database và xử lý background
      */
     public async handleWebhook(req: Request, res: Response): Promise<void> {
         try {
@@ -63,7 +63,8 @@ class WebhookController {
             if (event !== 'orderAdd' && event !== 'orderUpdate') {
                 res.status(200).json({
                     success: true,
-                    message: 'Event not supported'
+                    message: 'Event not supported',
+                    event
                 });
                 return;
             }
@@ -74,86 +75,60 @@ class WebhookController {
             if (!orderId) {
                 res.status(200).json({
                     success: true,
-                    message: 'No orderId found'
+                    message: 'No orderId found in webhook'
                 });
                 return;
             }
 
-            // ✅ LƯU VÀO QUEUE - Response ngay lập tức
-            // KHÔNG check duplicate ở đây, logic check sẽ ở processOrderEvent()
-            const queued = webhookQueueService.enqueue(event, orderId, req.body);
+            // LƯU VÀO DATABASE + CHECK DUPLICATE (< 50ms)
+            const { isNew, queueId } = await webhookQueueService.enqueue({
+                event,
+                orderId,
+                businessId,
+                payload: req.body
+            });
 
-            if (queued) {
-                logger.info(`Webhook queued successfully: Order ${orderId}`);
-                
-                // XỬ LÝ NGAY SAU KHI LƯU (không chờ đợi)
-                setImmediate(() => this.processNextWebhook());
-                
-                res.status(200).json({
-                    success: true,
-                    message: 'Webhook queued successfully',
-                    orderId,
-                    receivedAt: new Date().toISOString()
-                });
-            } else {
-                // Lưu queue thất bại nhưng vẫn trả 200 để Nhanh không retry
-                res.status(200).json({
-                    success: true,
-                    message: 'Webhook received but failed to queue',
-                    orderId
+            // TRẢ VỀ RESPONSE NGAY LẬP TỨC
+            res.status(200).json({
+                success: true,
+                message: isNew ? 'Webhook queued for processing' : 'Webhook already processed',
+                orderId,
+                queueId: isNew ? queueId : undefined,
+                receivedAt: new Date().toISOString()
+            });
+
+            // XỬ LÝ TRONG BACKGROUND nếu là webhook mới
+            if (isNew && queueId) {
+                setImmediate(async () => {
+                    try {
+                        const status = data?.info?.status || data?.status || req.body.status;
+                        const saleChannel = data?.channel?.saleChannel || data?.saleChannel || data?.sale_channel || req.body.saleChannel;
+
+                        logger.info(`Processing order ${orderId} from queue ${queueId}`);
+                        await this.processOrderEvent(orderId, status, saleChannel, queueId);
+                        
+                    } catch (error: any) {
+                        logger.error(`Error processing queue ${queueId}:`, error);
+                        await webhookQueueService.markAsFailed(queueId, error.message);
+                    }
                 });
             }
 
-        } catch (error) {
+        } catch (error: any) {
             logger.error('Error handling webhook', error);
             // Vẫn trả về 200 để Nhanh không gửi lại
             res.status(200).json({
                 success: true,
-                message: 'Webhook received',
-                note: 'Error occurred'
+                message: 'Webhook received but error occurred',
+                error: error.message
             });
-        }
-    }
-
-    /**
-     * Xử lý webhook tiếp theo trong queue
-     */
-    private async processNextWebhook(): Promise<void> {
-        try {
-            const webhook = webhookQueueService.dequeue();
-            
-            if (!webhook) {
-                return; // Không còn webhook nào
-            }
-
-            const { id, order_id, payload } = webhook as any;
-            const parsedPayload = JSON.parse(payload);
-            const status = parsedPayload.data?.info?.status;
-            const saleChannel = parsedPayload.data?.channel?.saleChannel;
-
-            logger.info(`Processing webhook ID=${id}, Order=${order_id}`);
-
-            try {
-                await this.processOrderEvent(order_id, status, saleChannel);
-                webhookQueueService.markCompleted(id);
-                logger.info(`Webhook ID=${id} completed successfully`);
-            } catch (error: any) {
-                webhookQueueService.markFailed(id, error.message);
-                logger.error(`Webhook ID=${id} failed:`, error.message);
-            }
-
-            // Xử lý webhook tiếp theo
-            setImmediate(() => this.processNextWebhook());
-
-        } catch (error: any) {
-            logger.error('Error processing next webhook:', error);
         }
     }
 
     /**
      * Process order events by orderId
      */
-    private async processOrderEvent(orderId: number, status?: number, saleChannel?: number): Promise<void> {
+    private async processOrderEvent(orderId: number, status?: number, saleChannel?: number, queueId?: number): Promise<void> {
         try {
             // Kiểm tra theo thứ tự ưu tiên:
             // 1. Shopee (saleChannel 42) + status 60
@@ -174,6 +149,9 @@ class WebhookController {
                 if (process.env.NODE_ENV === 'development') {
                     logger.debug(`Order ${orderId} skipped - status: ${status}, channel: ${saleChannel}`);
                 }
+                if (queueId) {
+                    await webhookQueueService.markAsFailed(queueId, 'Status not 60 or not Shopee channel');
+                }
                 return;
             }
 
@@ -182,6 +160,9 @@ class WebhookController {
 
             if (!isFirstTimeStatus60) {
                 logger.info(`Order ${orderId} - Already processed before (not first time status 60), skipping...`);
+                if (queueId) {
+                    await webhookQueueService.markAsFailed(queueId, 'Not first time status 60');
+                }
                 return;
             }
 
@@ -192,6 +173,9 @@ class WebhookController {
 
             if (!orderResponse || !orderResponse.data) {
                 logger.error(`Order ${orderId} not found`);
+                if (queueId) {
+                    await webhookQueueService.markAsFailed(queueId, 'Order not found in Nhanh.vn');
+                }
                 return;
             }
 
@@ -211,19 +195,28 @@ class WebhookController {
 
             if (!accessToken) {
                 logger.error(`Order ${orderId} - Missing MISA access token`);
+                if (queueId) {
+                    await webhookQueueService.markAsFailed(queueId, 'Missing MISA access token');
+                }
                 return;
             }
 
             // Gửi lên MISA
             const result = await amisService.saveVoucher([voucher], accessToken);
 
-            if (process.env.NODE_ENV === 'development') {
-                const statusLabel = status === 60 ? 'SUCCESS' : 'SHIPPING SHOPEE';
-                logger.info(`Order ${orderId} sent to MISA successfully (${statusLabel})`);
+            // ✅ Đánh dấu đã xử lý thành công
+            if (queueId) {
+                await webhookQueueService.markAsProcessed(orderId, queueId);
             }
+
+            logger.info(`Order ${orderId} sent to MISA successfully`);
 
         } catch (error: any) {
             logger.error(`Error processing order ${orderId}`, error);
+            if (queueId) {
+                await webhookQueueService.markAsFailed(queueId, error.message);
+            }
+            throw error;
         }
     }
 

@@ -1,238 +1,169 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import db from '../database/mysql';
 import logger from '../utils/logger';
 
+export interface WebhookQueueItem {
+    id?: number;
+    event: string;
+    order_id: number;
+    business_id?: number;
+    payload: any;
+    status?: 'pending' | 'processing' | 'completed' | 'failed';
+    retry_count?: number;
+    error_message?: string;
+    created_at?: Date;
+    processed_at?: Date;
+}
+
 /**
- * Webhook Queue Service using SQLite
- * Lưu webhook vào database và xử lý sau
+ * Webhook Queue Service
+ * Lưu webhook vào database và xử lý async
  */
 class WebhookQueueService {
-    private db: Database.Database;
-
-    constructor() {
-        // Tạo database file trong thư mục data
-        const dbPath = path.resolve(process.cwd(), 'data', 'webhooks.db');
-        this.db = new Database(dbPath);
-        
-        // Khởi tạo table
-        this.initDatabase();
-        
-        logger.info('Webhook Queue Service initialized with SQLite');
-    }
-
+    
     /**
-     * Khởi tạo database schema
+     * Lưu webhook vào queue và check duplicate
+     * @returns { isNew, queueId } - isNew = true nếu webhook mới, false nếu duplicate
      */
-    private initDatabase(): void {
-        const createTableSQL = `
-            CREATE TABLE IF NOT EXISTS webhook_queue (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                event TEXT NOT NULL,
-                order_id INTEGER NOT NULL,
-                payload TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                error_message TEXT,
-                created_at INTEGER NOT NULL,
-                processed_at INTEGER
-            )
-        `;
+    public async enqueue(data: {
+        event: string;
+        orderId: number;
+        businessId?: number;
+        payload: any;
+    }): Promise<{ isNew: boolean; queueId?: number }> {
+        const conn = await db.getConnection();
         
-        this.db.exec(createTableSQL);
-        
-        // Tạo indexes riêng
-        this.db.exec('CREATE INDEX IF NOT EXISTS idx_order_id ON webhook_queue(order_id)');
-        this.db.exec('CREATE INDEX IF NOT EXISTS idx_status ON webhook_queue(status)');
-        this.db.exec('CREATE INDEX IF NOT EXISTS idx_created_at ON webhook_queue(created_at)');
-        
-        logger.info('Webhook queue table initialized');
-    }
-
-    /**
-     * Thêm webhook vào queue
-     */
-    public enqueue(event: string, orderId: number, payload: any): boolean {
         try {
-            const insertSQL = `
-                INSERT INTO webhook_queue (event, order_id, payload, status, created_at)
-                VALUES (?, ?, ?, 'pending', ?)
-            `;
-            
-            const stmt = this.db.prepare(insertSQL);
-            const result = stmt.run(
-                event,
-                orderId,
-                JSON.stringify(payload),
-                Date.now()
+            await conn.beginTransaction();
+
+            // 1. Check xem order đã được xử lý chưa
+            const [existing] = await conn.execute<any[]>(
+                'SELECT id FROM processed_orders WHERE order_id = ?',
+                [data.orderId]
             );
-            
-            logger.info(`Webhook enqueued: ID=${result.lastInsertRowid}, Order=${orderId}, Event=${event}`);
-            return true;
-        } catch (error: any) {
-            logger.error('Error enqueuing webhook:', error);
-            return false;
-        }
-    }
 
-    /**
-     * Kiểm tra xem order đã có trong queue chưa
-     * Tránh xử lý trùng lặp
-     */
-    public hasOrderInQueue(orderId: number): boolean {
-        try {
-            const checkSQL = `
-                SELECT COUNT(*) as count 
-                FROM webhook_queue 
-                WHERE order_id = ? 
-                AND status IN ('pending', 'processing', 'completed')
-            `;
-            
-            const stmt = this.db.prepare(checkSQL);
-            const result = stmt.get(orderId) as { count: number };
-            
-            return result.count > 0;
-        } catch (error: any) {
-            logger.error('Error checking order in queue:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Lấy webhook pending đầu tiên để xử lý
-     */
-    public dequeue(): any | null {
-        try {
-            const selectSQL = `
-                SELECT * FROM webhook_queue 
-                WHERE status = 'pending' 
-                ORDER BY created_at ASC 
-                LIMIT 1
-            `;
-            
-            const webhook = this.db.prepare(selectSQL).get();
-            
-            if (webhook) {
-                // Đánh dấu là đang xử lý
-                const updateSQL = `
-                    UPDATE webhook_queue 
-                    SET status = 'processing' 
-                    WHERE id = ?
-                `;
-                this.db.prepare(updateSQL).run((webhook as any).id);
+            if (existing.length > 0) {
+                await conn.commit();
+                logger.info(`Order ${data.orderId} already processed - skipping webhook`);
+                return { isNew: false };
             }
-            
-            return webhook;
+
+            // 2. Insert vào webhook_queue
+            const [result] = await conn.execute<any>(
+                `INSERT INTO webhook_queue (event, order_id, business_id, payload, status)
+                 VALUES (?, ?, ?, ?, 'pending')
+                 ON DUPLICATE KEY UPDATE retry_count = retry_count + 1`,
+                [data.event, data.orderId, data.businessId, JSON.stringify(data.payload)]
+            );
+
+            await conn.commit();
+
+            const queueId = result.insertId;
+            logger.info(`Webhook enqueued: order ${data.orderId}, queue ID ${queueId}`);
+
+            return { isNew: true, queueId };
+
         } catch (error: any) {
-            logger.error('Error dequeuing webhook:', error);
-            return null;
+            await conn.rollback();
+            logger.error('Error enqueuing webhook:', error);
+            throw error;
+        } finally {
+            conn.release();
         }
     }
 
     /**
-     * Đánh dấu webhook đã xử lý thành công
+     * Đánh dấu order đã được xử lý thành công
      */
-    public markCompleted(id: number): void {
+    public async markAsProcessed(orderId: number, queueId: number): Promise<void> {
+        const conn = await db.getConnection();
+        
         try {
-            const updateSQL = `
-                UPDATE webhook_queue 
-                SET status = 'completed', processed_at = ? 
-                WHERE id = ?
-            `;
-            
-            this.db.prepare(updateSQL).run(Date.now(), id);
-            logger.info(`Webhook ${id} marked as completed`);
+            await conn.beginTransaction();
+
+            // 1. Insert vào processed_orders
+            await conn.execute(
+                'INSERT IGNORE INTO processed_orders (order_id) VALUES (?)',
+                [orderId]
+            );
+
+            // 2. Update webhook_queue status
+            await conn.execute(
+                `UPDATE webhook_queue 
+                 SET status = 'completed', processed_at = NOW() 
+                 WHERE id = ?`,
+                [queueId]
+            );
+
+            await conn.commit();
+            logger.info(`Order ${orderId} marked as processed`);
+
         } catch (error: any) {
-            logger.error('Error marking webhook as completed:', error);
+            await conn.rollback();
+            logger.error('Error marking as processed:', error);
+            throw error;
+        } finally {
+            conn.release();
         }
     }
 
     /**
-     * Đánh dấu webhook bị lỗi
+     * Đánh dấu xử lý thất bại
      */
-    public markFailed(id: number, errorMessage: string): void {
+    public async markAsFailed(queueId: number, errorMessage: string): Promise<void> {
         try {
-            const updateSQL = `
-                UPDATE webhook_queue 
-                SET status = 'failed', 
-                    retry_count = retry_count + 1,
-                    error_message = ?,
-                    processed_at = ?
-                WHERE id = ?
-            `;
-            
-            this.db.prepare(updateSQL).run(errorMessage, Date.now(), id);
-            logger.error(`Webhook ${id} marked as failed: ${errorMessage}`);
+            await db.query(
+                `UPDATE webhook_queue 
+                 SET status = 'failed', 
+                     error_message = ?,
+                     retry_count = retry_count + 1,
+                     processed_at = NOW()
+                 WHERE id = ?`,
+                [errorMessage, queueId]
+            );
+
+            logger.warn(`Queue item ${queueId} marked as failed: ${errorMessage}`);
         } catch (error: any) {
-            logger.error('Error marking webhook as failed:', error);
+            logger.error('Error marking as failed:', error);
         }
     }
 
     /**
-     * Retry webhook bị lỗi (reset về pending)
+     * Lấy pending webhooks để xử lý (cho cronjob)
      */
-    public retryFailed(id: number): void {
+    public async getPendingWebhooks(limit: number = 10): Promise<WebhookQueueItem[]> {
         try {
-            const updateSQL = `
-                UPDATE webhook_queue 
-                SET status = 'pending', processed_at = NULL 
-                WHERE id = ? AND retry_count < 3
-            `;
-            
-            this.db.prepare(updateSQL).run(id);
-            logger.info(`Webhook ${id} queued for retry`);
-        } catch (error: any) {
-            logger.error('Error retrying webhook:', error);
-        }
-    }
+            const rows = await db.query<any[]>(
+                `SELECT * FROM webhook_queue 
+                 WHERE status = 'pending' AND retry_count < 3
+                 ORDER BY created_at ASC
+                 LIMIT ?`,
+                [limit]
+            );
 
-    /**
-     * Lấy thống kê queue
-     */
-    public getStats(): any {
-        try {
-            const statsSQL = `
-                SELECT 
-                    status,
-                    COUNT(*) as count
-                FROM webhook_queue
-                GROUP BY status
-            `;
-            
-            const stats = this.db.prepare(statsSQL).all();
-            return stats;
+            return rows.map(row => ({
+                ...row,
+                payload: JSON.parse(row.payload)
+            }));
         } catch (error: any) {
-            logger.error('Error getting queue stats:', error);
+            logger.error('Error getting pending webhooks:', error);
             return [];
         }
     }
 
     /**
-     * Xóa các webhook đã hoàn thành (> 7 ngày)
+     * Check xem order đã được xử lý chưa (nhanh)
      */
-    public cleanupOldWebhooks(): number {
+    public async isOrderProcessed(orderId: number): Promise<boolean> {
         try {
-            const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-            const deleteSQL = `
-                DELETE FROM webhook_queue 
-                WHERE status = 'completed' 
-                AND processed_at < ?
-            `;
-            
-            const result = this.db.prepare(deleteSQL).run(sevenDaysAgo);
-            logger.info(`Cleaned up ${result.changes} old webhooks`);
-            return result.changes;
+            const rows = await db.query<any[]>(
+                'SELECT id FROM processed_orders WHERE order_id = ?',
+                [orderId]
+            );
+            return rows.length > 0;
         } catch (error: any) {
-            logger.error('Error cleaning up old webhooks:', error);
-            return 0;
+            logger.error('Error checking processed order:', error);
+            return false;
         }
-    }
-
-    /**
-     * Đóng database connection
-     */
-    public close(): void {
-        this.db.close();
-        logger.info('Webhook Queue Service closed');
     }
 }
 
