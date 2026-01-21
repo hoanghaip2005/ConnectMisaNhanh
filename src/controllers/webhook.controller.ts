@@ -4,6 +4,7 @@ import { NhanhService } from '../services/nhanh.services';
 import transformService from '../services/transform.services';
 import amisMapperService from '../services/amis-mapper.services';
 import amisService from '../services/amis.services';
+import webhookQueueService from '../services/webhook-queue.services';
 import logger from '../utils/logger';
 
 /**
@@ -58,48 +59,50 @@ class WebhookController {
                 });
             }
 
-            // TRẢ VỀ RESPONSE NGAY LẬP TỨC (< 1 giây)
-            // Tránh timeout từ Nhanh API (3 giây)
-            res.status(200).json({
-                success: true,
-                message: 'Webhook received and queued for processing',
-                receivedAt: new Date().toISOString()
-            });
+            // Chỉ xử lý order events
+            if (event !== 'orderAdd' && event !== 'orderUpdate') {
+                res.status(200).json({
+                    success: true,
+                    message: 'Event not supported'
+                });
+                return;
+            }
 
-            // XỬ LÝ TRONG BACKGROUND (không chờ đợi)
-            // Sử dụng setImmediate để xử lý sau khi response đã được gửi
-            setImmediate(async () => {
-                try {
-                    // Chỉ xử lý order events
-                    if (event !== 'orderAdd' && event !== 'orderUpdate') {
-                        if (process.env.NODE_ENV === 'development') {
-                            logger.debug(`Skipping event: ${event} (not supported)`);
-                        }
-                        return;
-                    }
+            // Lấy orderId
+            const orderId = data?.info?.id || data?.orderId || data?.id || req.body.id || req.body.orderId;
 
-                    // Xử lý event với orderId cụ thể
-                    // Webhook từ Nhanh.vn gửi orderId ở data.info.id
-                    let orderId = data?.info?.id || data?.orderId || data?.id || req.body.id || req.body.orderId;
-                    let status = data?.info?.status || data?.status || req.body.status;
-                    let saleChannel = data?.channel?.saleChannel || data?.saleChannel || data?.sale_channel || req.body.saleChannel;
+            if (!orderId) {
+                res.status(200).json({
+                    success: true,
+                    message: 'No orderId found'
+                });
+                return;
+            }
 
-                    if (orderId) {
-                        // Có orderId - xử lý trực tiếp
-                        logger.info(`Processing order ${orderId} with status ${status}`);
-                        await this.processOrderEvent(orderId, status, saleChannel);
-                    } else {
-                        // Không có orderId - lấy đơn mới nhất
-                        logger.info('No orderId found - fetching recent orders with status 60');
-                        await this.handleOrderEventWithoutId(event);
-                    }
+            // ✅ LƯU VÀO QUEUE - Response ngay lập tức
+            // KHÔNG check duplicate ở đây, logic check sẽ ở processOrderEvent()
+            const queued = webhookQueueService.enqueue(event, orderId, req.body);
 
-                    logger.info('Order processing completed successfully');
-                } catch (error) {
-                    logger.error('Error during background processing', error);
-                    // Log error nhưng không ảnh hưởng đến response đã gửi
-                }
-            });
+            if (queued) {
+                logger.info(`Webhook queued successfully: Order ${orderId}`);
+                
+                // XỬ LÝ NGAY SAU KHI LƯU (không chờ đợi)
+                setImmediate(() => this.processNextWebhook());
+                
+                res.status(200).json({
+                    success: true,
+                    message: 'Webhook queued successfully',
+                    orderId,
+                    receivedAt: new Date().toISOString()
+                });
+            } else {
+                // Lưu queue thất bại nhưng vẫn trả 200 để Nhanh không retry
+                res.status(200).json({
+                    success: true,
+                    message: 'Webhook received but failed to queue',
+                    orderId
+                });
+            }
 
         } catch (error) {
             logger.error('Error handling webhook', error);
@@ -107,8 +110,43 @@ class WebhookController {
             res.status(200).json({
                 success: true,
                 message: 'Webhook received',
-                note: 'Error occurred but queued for retry'
+                note: 'Error occurred'
             });
+        }
+    }
+
+    /**
+     * Xử lý webhook tiếp theo trong queue
+     */
+    private async processNextWebhook(): Promise<void> {
+        try {
+            const webhook = webhookQueueService.dequeue();
+            
+            if (!webhook) {
+                return; // Không còn webhook nào
+            }
+
+            const { id, order_id, payload } = webhook as any;
+            const parsedPayload = JSON.parse(payload);
+            const status = parsedPayload.data?.info?.status;
+            const saleChannel = parsedPayload.data?.channel?.saleChannel;
+
+            logger.info(`Processing webhook ID=${id}, Order=${order_id}`);
+
+            try {
+                await this.processOrderEvent(order_id, status, saleChannel);
+                webhookQueueService.markCompleted(id);
+                logger.info(`Webhook ID=${id} completed successfully`);
+            } catch (error: any) {
+                webhookQueueService.markFailed(id, error.message);
+                logger.error(`Webhook ID=${id} failed:`, error.message);
+            }
+
+            // Xử lý webhook tiếp theo
+            setImmediate(() => this.processNextWebhook());
+
+        } catch (error: any) {
+            logger.error('Error processing next webhook:', error);
         }
     }
 
