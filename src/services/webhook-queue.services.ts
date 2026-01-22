@@ -19,7 +19,7 @@ export interface WebhookQueueItem {
  * Lưu webhook vào database và xử lý async
  */
 class WebhookQueueService {
-    
+
     /**
      * Lưu webhook vào queue và check duplicate
      * @returns { isNew, queueId } - isNew = true nếu webhook mới, false nếu duplicate
@@ -31,7 +31,7 @@ class WebhookQueueService {
         payload: any;
     }): Promise<{ isNew: boolean; queueId?: number }> {
         const conn = await db.getConnection();
-        
+
         try {
             await conn.beginTransaction();
 
@@ -76,7 +76,7 @@ class WebhookQueueService {
      */
     public async markAsProcessed(orderId: number, queueId: number): Promise<void> {
         const conn = await db.getConnection();
-        
+
         try {
             await conn.beginTransaction();
 

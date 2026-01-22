@@ -2,13 +2,24 @@ import { Request, Response } from 'express';
 import nhanhService from '../services/nhanh.services';
 import amisMapperService from '../services/amis-mapper.services';
 import amisService from '../services/amis.services';
+import retailBillSyncService from '../services/retail-bill-sync.services';
 
 /**
  * Controller for Nhanh.vn OAuth and API integration
  */
 export class NhanhController {
     /**
-     * Step 1: Initiate OAuth flow - Redirect user to Nhanh.vn authorization page
+     *            // 3. Xử lý từng hóa đơn và lập chứng từ (cả type 1 và type 2)
+            const results = [];
+            let successCount = 0;
+            let failCount = 0;
+
+            const accessToken = process.env.MISA_ACCESS_TOKEN;
+            if (!accessToken) {
+                throw new Error('MISA access token not found');
+            }
+
+            for (const bill of bills) {itiate OAuth flow - Redirect user to Nhanh.vn authorization page
      * GET /api/nhanh/oauth/initiate
      */
     public async initiateOAuth(req: Request, res: Response): Promise<void> {
@@ -247,19 +258,195 @@ export class NhanhController {
     /**
      * Lấy danh sách hóa đơn bán lẻ
      * POST /api/nhanh/bills/retail
+     * Body: { 
+     *   filters: { fromDate: "2025-07-16", toDate: "2025-08-16", ... }, 
+     *   paginator: { size: 50, next: { id: 100 } }, 
+     *   dataOptions: {} 
+     * }
      */
     public async getRetailBills(req: Request, res: Response): Promise<void> {
         try {
-            const response = await nhanhService.getRetailBills(req.body);
+            const { filters, paginator, dataOptions } = req.body;
 
-            res.status(200).json({
-                success: true,
-                data: response
-            });
+            // Validate required date parameters
+            if (!filters || (!filters.fromDate && !filters.toDate)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required filters. Please provide at least fromDate or toDate in yyyy-mm-dd format'
+                });
+                return;
+            }
+
+            // Build request with defaults
+            const request = {
+                filters: filters || {},
+                paginator: paginator || { size: 50 },
+                dataOptions: dataOptions || {}
+            };
+
+            const billsResponse = await nhanhService.getRetailBills(request);
+
+            if (billsResponse.code === 1) {
+                const bills = billsResponse.data || [];
+
+                // Calculate statistics
+                let totalAmount = 0;
+                const statusBreakdown: { [key: string]: number } = {};
+                const storeBreakdown: { [key: string]: number } = {};
+
+                bills.forEach((bill: any) => {
+                    // Sum total amount (sử dụng payment.amount thay vì totalAmount)
+                    const amount = parseFloat(bill.payment?.amount || 0);
+                    totalAmount += amount;
+
+                    // Count by status (nếu có field status)
+                    const status = bill.status;
+                    if (status !== undefined) {
+                        statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
+                    }
+
+                    // Count by store/depot
+                    const storeId = bill.depotId || bill.storeId;
+                    if (storeId) {
+                        storeBreakdown[storeId] = (storeBreakdown[storeId] || 0) + 1;
+                    }
+                });
+
+                res.status(200).json({
+                    success: true,
+                    data: bills,
+                    statistics: {
+                        totalBills: bills.length,
+                        totalAmount: Math.round(totalAmount),
+                        averageBillValue: bills.length > 0 ? Math.round(totalAmount / bills.length) : 0,
+                        byStatus: statusBreakdown,
+                        byStore: storeBreakdown
+                    },
+                    paginator: billsResponse.paginator,
+                    filters: {
+                        fromDate: filters.fromDate,
+                        toDate: filters.toDate
+                    },
+                    message: 'Retail bills retrieved successfully'
+                });
+            } else {
+                res.status(400).json({
+                    success: false,
+                    message: billsResponse.messages?.join(', ') || 'Failed to get retail bills'
+                });
+            }
         } catch (error: any) {
             res.status(500).json({
                 success: false,
                 message: error.message || 'Failed to get retail bills'
+            });
+        }
+    }
+
+    /**
+     * Đồng bộ hóa đơn bán lẻ hàng loạt theo ngày
+     * POST /api/nhanh/bills/retail/sync
+     * Body: { fromDate: "2025-01-22", toDate: "2025-01-22", autoProcess: true }
+     */
+    public async syncRetailBills(req: Request, res: Response): Promise<void> {
+        try {
+            const { fromDate, toDate, autoProcess = false } = req.body;
+
+            if (!fromDate || !toDate) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required parameters: fromDate and toDate (format: yyyy-mm-dd)'
+                });
+                return;
+            }
+
+            // 1. Lấy danh sách hóa đơn từ Nhanh.vn
+            const billsResponse = await nhanhService.getRetailBills({
+                filters: { fromDate, toDate },
+                paginator: { size: 100 }, // Lấy tối đa 100 bills
+                dataOptions: {}
+            });
+
+            if (billsResponse.code !== 1 || !billsResponse.data) {
+                res.status(400).json({
+                    success: false,
+                    message: billsResponse.messages?.join(', ') || 'Failed to get retail bills'
+                });
+                return;
+            }
+
+            const bills = billsResponse.data;
+
+            // 2. Nếu không autoProcess, chỉ trả về danh sách
+            if (!autoProcess) {
+                res.status(200).json({
+                    success: true,
+                    data: bills,
+                    totalBills: bills.length,
+                    message: `Found ${bills.length} retail bills. Set autoProcess=true to sync to MISA`
+                });
+                return;
+            }
+
+            // 3. Xử lý từng hóa đơn và lập chứng từ (cả type 1 và type 2)
+            const results = [];
+            let successCount = 0;
+            let failCount = 0;
+
+            const accessToken = process.env.MISA_ACCESS_TOKEN;
+            if (!accessToken) {
+                throw new Error('MISA access token not found');
+            }
+
+            for (const bill of bills) {
+                try {
+                    // Map sang format AMIS
+                    const voucher = amisMapperService.mapRetailBillToAmisVoucher(bill);
+
+                    // Gửi lên MISA
+                    const amisResponse = await amisService.saveVoucher([voucher], accessToken);
+
+                    results.push({
+                        billId: bill.id,
+                        customerName: bill.customer?.name || 'N/A',
+                        amount: bill.payment?.amount || 0,
+                        status: 'success',
+                        voucherNo: voucher.org_refno,
+                        amisResponse: amisResponse
+                    });
+
+                    successCount++;
+                } catch (error: any) {
+                    results.push({
+                        billId: bill.id,
+                        customerName: bill.customer?.name || 'N/A',
+                        amount: bill.payment?.amount || 0,
+                        status: 'failed',
+                        error: error.message
+                    });
+
+                    failCount++;
+                }
+            }
+
+            // 4. Trả về kết quả
+            res.status(200).json({
+                success: true,
+                summary: {
+                    totalBills: bills.length,
+                    successCount,
+                    failCount,
+                    fromDate,
+                    toDate
+                },
+                results,
+                message: `Processed ${bills.length} bills: ${successCount} success, ${failCount} failed`
+            });
+
+        } catch (error: any) {
+            res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to sync retail bills'
             });
         }
     }
@@ -397,6 +584,35 @@ export class NhanhController {
             res.status(500).json({
                 success: false,
                 message: error.message || 'Failed to get order history'
+            });
+        }
+    }
+
+    /**
+     * Trigger manual sync của retail bills (ngày hôm qua)
+     * POST /api/nhanh/bills/retail/sync-yesterday
+     */
+    public async syncYesterday(req: Request, res: Response): Promise<void> {
+        try {
+            const result = await retailBillSyncService.syncYesterdayBills();
+
+            if (result.success) {
+                res.status(200).json({
+                    success: true,
+                    summary: result.summary,
+                    results: result.results,
+                    message: 'Sync completed successfully'
+                });
+            } else {
+                res.status(400).json({
+                    success: false,
+                    message: result.error || 'Sync failed'
+                });
+            }
+        } catch (error: any) {
+            res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to sync yesterday bills'
             });
         }
     }

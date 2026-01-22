@@ -106,7 +106,7 @@ class WebhookController {
 
                         logger.info(`Processing order ${orderId} from queue ${queueId}`);
                         await this.processOrderEvent(orderId, status, saleChannel, queueId);
-                        
+
                     } catch (error: any) {
                         logger.error(`Error processing queue ${queueId}:`, error);
                         await webhookQueueService.markAsFailed(queueId, error.message);
@@ -360,6 +360,42 @@ class WebhookController {
             uptime: process.uptime(),
             message: 'Webhook endpoint is ready'
         });
+    }
+
+    /**
+     * Manually process an order and create voucher
+     * POST /api/webhooks/nhanh/process-order/:orderId
+     */
+    public async manualProcessOrder(req: Request, res: Response): Promise<void> {
+        try {
+            const orderId = parseInt(req.params.orderId);
+
+            if (!orderId || isNaN(orderId)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid order ID'
+                });
+                return;
+            }
+
+            logger.info(`Manual processing order ${orderId}...`);
+
+            // Process the order (sử dụng method private đã có)
+            await this.processOrderEvent(orderId, 60); // Status 60 = Thành công
+
+            res.status(200).json({
+                success: true,
+                orderId,
+                message: `Order ${orderId} processed successfully`
+            });
+
+        } catch (error: any) {
+            logger.error(`Failed to manually process order`, { error: error.message });
+            res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to process order'
+            });
+        }
     }
 }
 

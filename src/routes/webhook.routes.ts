@@ -47,4 +47,10 @@ router.get('/status', (req, res) => webhookController.getWebhookStatus(req, res)
  */
 router.get('/health', (req, res) => webhookController.healthCheck(req, res));
 
+/**
+ * POST /api/webhooks/nhanh/process-order/:orderId
+ * Manually process an order and create voucher
+ */
+router.post('/nhanh/process-order/:orderId', (req, res) => webhookController.manualProcessOrder(req, res));
+
 export default router;

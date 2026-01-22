@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import apiRoutes from './routes/api.routes';
 import amisTokenManager from './services/amis-token-manager.services';
+import retailBillSyncService from './services/retail-bill-sync.services';
 import logger from './utils/logger';
 
 // Load config
@@ -39,7 +40,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
             ip: req.ip || req.socket.remoteAddress,
             body: typeof err.body === 'string' ? err.body.substring(0, 100) : 'invalid'
         });
-        
+
         return res.status(400).json({
             success: false,
             error: 'Bad Request',
@@ -72,7 +73,7 @@ app.use(blockedPaths, (req, res) => {
         ip: req.ip || req.socket.remoteAddress,
         userAgent: req.get('user-agent')
     });
-    
+
     res.status(404).json({
         success: false,
         message: 'Not found'
@@ -134,6 +135,9 @@ app.listen(PORT, () => {
 
     // Start AMIS token auto-refresh
     amisTokenManager.startAutoRefresh();
+
+    // Start retail bill sync cron job (runs at 00:30 daily)
+    retailBillSyncService.startCronJob();
 });
 
 export default app;

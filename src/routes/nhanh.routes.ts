@@ -42,6 +42,15 @@ router.get('/orders/history/:orderId', (req, res) => nhanhController.getOrderHis
 // Body: { "filters": {...}, "paginator": {...}, "dataOptions": {...} }
 router.post('/bills/retail', (req, res) => nhanhController.getRetailBills(req, res));
 
+// Sync retail bills (lấy + tự động lập chứng từ hàng loạt)
+// POST /api/nhanh/bills/retail/sync
+// Body: { "fromDate": "2025-01-22", "toDate": "2025-01-22", "autoProcess": true }
+router.post('/bills/retail/sync', (req, res) => nhanhController.syncRetailBills(req, res));
+
+// Sync yesterday retail bills (tự động lấy ngày hôm qua)
+// POST /api/nhanh/bills/retail/sync-yesterday
+router.post('/bills/retail/sync-yesterday', (req, res) => nhanhController.syncYesterday(req, res));
+
 // Process retail bill and send to MISA
 // POST /api/nhanh/bills/retail/process/:billId
 router.post('/bills/retail/process/:billId', (req, res) => nhanhController.processRetailBill(req, res));

@@ -8,7 +8,9 @@ import {
     CheckTokenResponse,
     OAuthUrlParams,
     OrderListRequest,
-    OrderListResponse
+    OrderListResponse,
+    RetailBillRequest,
+    RetailBillResponse
 } from '../types/nhanh.types';// Load environment variables
 dotenv.config();
 
@@ -293,8 +295,11 @@ export class NhanhService {
 
     /**
      * Lấy danh sách hóa đơn bán lẻ
+     * POST /v3.0/bill/retail
+     * @param request - Retail bill request với filters (fromDate, toDate), paginator, dataOptions
+     * @returns Retail bill response
      */
-    public async getRetailBills(request: any): Promise<any> {
+    public async getRetailBills(request: RetailBillRequest): Promise<RetailBillResponse> {
         try {
             const accessToken = process.env.NHANH_ACCESS_TOKEN;
             const businessId = process.env.NHANH_BUSINESS_ID;
@@ -302,6 +307,21 @@ export class NhanhService {
 
             if (!accessToken || !businessId) {
                 throw new Error('Missing access token or business ID');
+            }
+
+            // Validate date format if provided
+            if (request.filters?.fromDate) {
+                const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+                if (!dateRegex.test(request.filters.fromDate)) {
+                    throw new Error('Invalid fromDate format. Expected yyyy-mm-dd (e.g., 2025-07-16)');
+                }
+            }
+
+            if (request.filters?.toDate) {
+                const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+                if (!dateRegex.test(request.filters.toDate)) {
+                    throw new Error('Invalid toDate format. Expected yyyy-mm-dd (e.g., 2025-08-16)');
+                }
             }
 
             const url = `${this.config.baseUrl}/v${this.config.apiVersion}/bill/retail`;

@@ -73,7 +73,7 @@ export class AmisMapperService {
         const orgRefId = this.generateGuid();
 
         // Số hóa đơn (nếu có, nếu không dùng mã đơn hàng)
-        const invoiceNo = invNo || `DH${orderId}`;
+        const invoiceNo = invNo || `BH${orderId}`;
 
         // Tạo tên khách hàng: "Người mua không cung cấp thông tin - {orderId}"
         const accountObjectName = `Người mua không cung cấp thông tin - ${orderId}`;
@@ -126,7 +126,7 @@ export class AmisMapperService {
         const voucher: SaVoucher = {
             voucher_type: 13,
             org_refid: orgRefId,
-            org_refno: `DH${orderId}`,
+            org_refno: `BH${orderId}`,
             branch_id: this.branchId,
             account_object_code: 'KH00509',  // Mã khách hàng mặc định
             account_object_name: accountObjectName,
@@ -163,7 +163,14 @@ export class AmisMapperService {
         }
 
         const billId = bill.id;
+        const billType = bill.type; // 1 = Trả hàng, 2 = Xuất kho bán lẻ
         const customerName = bill.customer?.name || 'Khách lẻ';
+
+        // Xác định voucher_type và prefix dựa vào bill.type
+        // Type 1 (Trả hàng) -> voucher_type = 12 (Hàng bán bị trả lại)
+        // Type 2 (Bán lẻ) -> voucher_type = 13 (Hóa đơn bán hàng)
+        const voucherType = billType === 1 ? 12 : 13;
+        const prefix = billType === 1 ? 'BTL' : 'BH'; // BTL = Trả hàng, BH = Hóa đơn bán
 
         // Tính tổng tiền
         let totalSaleAmount = 0;
@@ -207,20 +214,21 @@ export class AmisMapperService {
         totalAmount = totalSaleAmount + totalVatAmount;
 
         const orgRefId = this.generateGuid();
-        const invoiceNo = invNo || `HDB${billId}`;
+        const invoiceNo = invNo || `${prefix}${billId}`;
 
         // Tên khách hàng: {tên từ hoá đơn} - {ID hoá đơn}
         const accountObjectName = `${customerName} - ${billId}`;
 
-        // Diễn giải: Bán hàng {tên} - {ID hoá đơn} theo hóa đơn số {số hoá đơn}
-        const journalMemo = `Bán hàng ${customerName} - ${billId} theo hóa đơn số ${invoiceNo}`;
+        // Diễn giải theo loại bill
+        const action = billType === 1 ? 'Trả hàng' : 'Bán hàng';
+        const journalMemo = `${action} ${customerName} - ${billId} theo hóa đơn số ${invoiceNo}`;
 
         const currentDateTime = this.getCurrentDateTime();
 
         const voucher: SaVoucher = {
-            voucher_type: 13,
+            voucher_type: voucherType,
             org_refid: orgRefId,
-            org_refno: `HDB${billId}`,
+            org_refno: invoiceNo,
             branch_id: this.branchId,
             account_object_code: 'KH000002',  // Mã khách hàng mặc định cho hoá đơn bán lẻ
             account_object_name: accountObjectName,

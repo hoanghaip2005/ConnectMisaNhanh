@@ -126,3 +126,53 @@ export interface OrderHistoryItem {
     createdById: number;         // ID người thao tác
     createdBy: string;           // Người thao tác
 }
+
+/**
+ * Retail Bill List Filters
+ */
+export interface RetailBillFilters {
+    id?: number;                 // ID hóa đơn
+    depotIds?: number[];         // Mảng ID kho
+    type?: number;               // Loại xuất nhập kho: 1 = Nhập kho (Trả hàng), 2 = Xuất kho (Bán lẻ)
+    orderIds?: number[];         // Mảng ID đơn hàng (tối đa 100)
+    customerId?: number;         // ID khách hàng
+    customerPhone?: string;      // Số điện thoại khách hàng (customerMobile trong API)
+    fromDate?: string;           // Ngày xuất kho từ (yyyy-mm-dd)
+    toDate?: string;             // Ngày xuất kho đến (yyyy-mm-dd)
+    storeIds?: number[];         // Mảng ID cửa hàng (deprecated, dùng depotIds)
+    status?: number[];           // Mảng trạng thái hóa đơn
+}
+
+/**
+ * Retail Bill Paginator
+ */
+export interface RetailBillPaginator {
+    size?: number;               // Số lượng bản ghi trả về (mặc định 50, tối đa 100)
+    next?: {                     // Thông tin phân trang
+        id?: number;             // ID của bản ghi cuối cùng trang trước
+    };
+}
+
+/**
+ * Retail Bill Request
+ */
+export interface RetailBillRequest {
+    filters?: RetailBillFilters;
+    paginator?: RetailBillPaginator;
+    dataOptions?: Record<string, any>;
+}
+
+/**
+ * Retail Bill Response
+ */
+export interface RetailBillResponse {
+    code: number;
+    data?: any[];
+    paginator?: {
+        next?: {
+            id?: number;
+        };
+    };
+    messages?: string[];
+    errorCode?: string;
+}
