@@ -368,7 +368,7 @@ class WebhookController {
      */
     public async manualProcessOrder(req: Request, res: Response): Promise<void> {
         try {
-            const orderId = parseInt(req.params.orderId);
+            const orderId = parseInt(String(req.params.orderId));
 
             if (!orderId || isNaN(orderId)) {
                 res.status(400).json({
