@@ -95,8 +95,8 @@ class RetailBillSyncService {
                     // Map sang format AMIS
                     const voucher = amisMapperService.mapRetailBillToAmisVoucher(bill);
 
-                    // Gửi lên MISA
-                    const amisResponse = await amisService.saveVoucher([voucher], accessToken);
+                    // Gửi lên MISA với retry
+                    const amisResponse = await this.saveVoucherWithRetry(voucher, accessToken, bill.id);
 
                     results.push({
                         billId: bill.id,
@@ -119,7 +119,12 @@ class RetailBillSyncService {
                     });
 
                     failCount++;
-                    logger.error(`❌ Failed to process bill ${bill.id}`, { error: error.message });
+                    logger.error(`❌ Failed to process bill ${bill.id}`, { 
+                        error: error.message,
+                        billId: bill.id,
+                        customerName: bill.customer?.name,
+                        type: bill.type
+                    });
                 }
 
                 // Delay nhỏ giữa các request để tránh rate limit
@@ -170,6 +175,62 @@ class RetailBillSyncService {
      */
     private delay(ms: number): Promise<void> {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /**
+     * Save voucher to MISA with retry logic
+     * Retry up to 3 times if timeout or network error
+     */
+    private async saveVoucherWithRetry(
+        voucher: any, 
+        accessToken: string, 
+        billId: number,
+        maxRetries: number = 3
+    ): Promise<any> {
+        let lastError: any;
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                logger.info(`📤 Sending voucher to MISA (attempt ${attempt}/${maxRetries}) - Bill ${billId}`);
+                
+                const response = await amisService.saveVoucher([voucher], accessToken);
+                
+                logger.info(`✅ MISA response received - Bill ${billId}`);
+                return response;
+
+            } catch (error: any) {
+                lastError = error;
+                
+                const isTimeout = error.message?.includes('timeout') || 
+                                error.code === 'ETIMEDOUT' || 
+                                error.code === 'ECONNABORTED';
+                
+                const isNetworkError = error.code === 'ECONNRESET' || 
+                                     error.code === 'ENOTFOUND' ||
+                                     error.message?.includes('Resolving timed out');
+
+                if (isTimeout || isNetworkError) {
+                    logger.warn(`⚠️ ${isTimeout ? 'Timeout' : 'Network error'} on attempt ${attempt}/${maxRetries} - Bill ${billId}`, {
+                        error: error.message,
+                        code: error.code
+                    });
+
+                    if (attempt < maxRetries) {
+                        // Exponential backoff: 2s, 4s, 8s
+                        const waitTime = Math.pow(2, attempt) * 1000;
+                        logger.info(`⏳ Waiting ${waitTime}ms before retry...`);
+                        await this.delay(waitTime);
+                        continue;
+                    }
+                }
+
+                // Nếu không phải timeout/network error, throw ngay
+                throw error;
+            }
+        }
+
+        // Hết số lần retry
+        throw new Error(`Failed after ${maxRetries} attempts: ${lastError.message}`);
     }
 
     /**

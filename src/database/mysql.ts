@@ -20,10 +20,11 @@ class Database {
                 password: process.env.MYSQL_PASSWORD || '',
                 database: process.env.MYSQL_DATABASE || 'middleware_integration',
                 waitForConnections: true,
-                connectionLimit: 10,
+                connectionLimit: 20,  // Tăng từ 10 lên 20 để xử lý nhiều webhooks đồng thời
                 queueLimit: 0,
                 enableKeepAlive: true,
-                keepAliveInitialDelay: 0
+                keepAliveInitialDelay: 0,
+                connectTimeout: 2000  // Timeout kết nối sau 2s
             });
 
             logger.info('MySQL connection pool created');
