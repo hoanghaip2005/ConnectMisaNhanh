@@ -35,10 +35,13 @@ class WebhookQueueService {
             // Trade-off: Có thể bị race condition trong trường hợp cực hiếm (2 webhook cùng lúc)
 
             // 1. Check xem order đã được xử lý chưa (< 10ms với index)
-            const [existing] = await db.query<any[]>(
+            const result = await db.query<any[]>(
                 'SELECT 1 FROM processed_orders WHERE order_id = ? LIMIT 1',
                 [data.orderId]
             );
+
+            // db.query trả về [rows, fields], lấy rows (phần tử đầu tiên)
+            const existing = Array.isArray(result) ? result[0] : result;
 
             if (existing && Array.isArray(existing) && existing.length > 0) {
                 logger.info(`Order ${data.orderId} already processed - skipping webhook`);
@@ -47,14 +50,16 @@ class WebhookQueueService {
 
             // 2. Insert vào webhook_queue (< 20ms)
             // ON DUPLICATE KEY tự động handle duplicate nếu có
-            const [result] = await db.query<any>(
+            const insertResult = await db.query<any>(
                 `INSERT INTO webhook_queue (event, order_id, business_id, payload, status)
                  VALUES (?, ?, ?, ?, 'pending')
                  ON DUPLICATE KEY UPDATE retry_count = retry_count + 1`,
                 [data.event, data.orderId, data.businessId, JSON.stringify(data.payload)]
             );
 
-            const queueId = result.insertId;
+            // db.query trả về [ResultSetHeader, FieldPacket[]], lấy ResultSetHeader
+            const insertResultData = Array.isArray(insertResult) ? insertResult[0] : insertResult;
+            const queueId = insertResultData?.insertId || 0;
 
             if (queueId > 0) {
                 logger.info(`Webhook enqueued: order ${data.orderId}, queue ID ${queueId}`);
