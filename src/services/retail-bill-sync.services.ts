@@ -13,22 +13,22 @@ class RetailBillSyncService {
 
     /**
      * Khởi động cron job
-     * Chạy vào 16:00 chiều hàng ngày, lấy bills từ 16:00 ngày hôm qua đến 16:00 hôm nay
+     * Chạy vào 16:05 chiều hàng ngày, lấy bills từ 16:00 ngày hôm qua đến 16:00 hôm nay
      * 
-     * VD: Ngày 28/1 lúc 16:00 → Lấy bills từ 27/1 16:00 đến 28/1 16:00
+     * VD: Ngày 28/1 lúc 16:05 → Lấy bills từ 27/1 16:00 đến 28/1 16:00
      * 
      * Logic:
      * - API Nhanh chỉ hỗ trợ filter theo ngày (yyyy-mm-dd), không có giờ
      * - Cần lấy cả 2 ngày (27/1 và 28/1) rồi filter theo createdAt timestamp
      */
     public startCronJob(): void {
-        // Cron pattern: '0 16 * * *' = 16:00 mỗi ngày
-        cron.schedule('0 16 * * *', async () => {
+        // Cron pattern: '5 16 * * *' = 16:05 mỗi ngày
+        cron.schedule('5 16 * * *', async () => {
             logger.info('🕐 Cron job started: Syncing retail bills (yesterday 16:00 to today 16:00)');
             await this.syncLast24Hours();
         });
 
-        logger.info('✅ Retail bill sync cron job initialized (runs at 16:00 daily)');
+        logger.info('✅ Retail bill sync cron job initialized (runs at 16:05 daily)');
     }
 
     /**
@@ -135,7 +135,8 @@ class RetailBillSyncService {
 
             for (const bill of filteredBills) {
                 try {
-                    logger.info(`🔄 Processing bill ${bill.id} (type=${bill.type}, createdAt=${new Date(bill.createdAt * 1000).toISOString()})...`);
+                    const billCreatedAt = bill.created?.createdAt || bill.createdAt || 0;
+                    logger.info(`🔄 Processing bill ${bill.id} (type=${bill.type}, createdAt=${new Date(billCreatedAt * 1000).toISOString()})...`);
 
                     // Map sang format AMIS
                     const voucher = amisMapperService.mapRetailBillToAmisVoucher(bill);
@@ -147,7 +148,7 @@ class RetailBillSyncService {
                         billId: bill.id,
                         customerName: bill.customer?.name || 'N/A',
                         amount: bill.payment?.amount || 0,
-                        createdAt: new Date(bill.createdAt * 1000).toISOString(),
+                        createdAt: new Date(billCreatedAt * 1000).toISOString(),
                         status: 'success',
                         voucherNo: voucher.org_refno,
                         amisResponse: amisResponse.Success ? 'Created' : 'Failed'
@@ -160,11 +161,12 @@ class RetailBillSyncService {
                     await this.delay(500);
 
                 } catch (error: any) {
+                    const billCreatedAt = bill.created?.createdAt || bill.createdAt || 0;
                     results.push({
                         billId: bill.id,
                         customerName: bill.customer?.name || 'N/A',
                         amount: bill.payment?.amount || 0,
-                        createdAt: bill.createdAt ? new Date(bill.createdAt * 1000).toISOString() : 'N/A',
+                        createdAt: billCreatedAt ? new Date(billCreatedAt * 1000).toISOString() : 'N/A',
                         status: 'failed',
                         error: error.message
                     });
