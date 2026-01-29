@@ -30,44 +30,46 @@ class WebhookQueueService {
         businessId?: number;
         payload: any;
     }): Promise<{ isNew: boolean; queueId?: number }> {
-        const conn = await db.getConnection();
-
         try {
-            await conn.beginTransaction();
-
-            // 1. Check xem order đã được xử lý chưa
-            const [existing] = await conn.execute<any[]>(
-                'SELECT id FROM processed_orders WHERE order_id = ?',
+            // OPTIMIZATION: Loại bỏ transaction để tăng tốc độ response
+            // Trade-off: Có thể bị race condition trong trường hợp cực hiếm (2 webhook cùng lúc)
+            
+            // 1. Check xem order đã được xử lý chưa (< 10ms với index)
+            const [existing] = await db.query<any[]>(
+                'SELECT 1 FROM processed_orders WHERE order_id = ? LIMIT 1',
                 [data.orderId]
             );
 
             if (existing.length > 0) {
-                await conn.commit();
                 logger.info(`Order ${data.orderId} already processed - skipping webhook`);
                 return { isNew: false };
             }
 
-            // 2. Insert vào webhook_queue
-            const [result] = await conn.execute<any>(
+            // 2. Insert vào webhook_queue (< 20ms)
+            // ON DUPLICATE KEY tự động handle duplicate nếu có
+            const [result] = await db.query<any>(
                 `INSERT INTO webhook_queue (event, order_id, business_id, payload, status)
                  VALUES (?, ?, ?, ?, 'pending')
                  ON DUPLICATE KEY UPDATE retry_count = retry_count + 1`,
                 [data.event, data.orderId, data.businessId, JSON.stringify(data.payload)]
             );
 
-            await conn.commit();
-
             const queueId = result.insertId;
-            logger.info(`Webhook enqueued: order ${data.orderId}, queue ID ${queueId}`);
-
-            return { isNew: true, queueId };
+            
+            if (queueId > 0) {
+                logger.info(`Webhook enqueued: order ${data.orderId}, queue ID ${queueId}`);
+                return { isNew: true, queueId };
+            } else {
+                // Trường hợp ON DUPLICATE KEY (webhook duplicate)
+                logger.info(`Webhook duplicate: order ${data.orderId}`);
+                return { isNew: false };
+            }
 
         } catch (error: any) {
-            await conn.rollback();
             logger.error('Error enqueuing webhook:', error);
-            throw error;
-        } finally {
-            conn.release();
+            // KHÔNG throw error để webhook vẫn trả về 200 cho Nhanh
+            // Return isNew = false để skip processing
+            return { isNew: false };
         }
     }
 

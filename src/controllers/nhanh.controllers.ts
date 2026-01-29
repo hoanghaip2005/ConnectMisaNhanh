@@ -3,6 +3,7 @@ import nhanhService from '../services/nhanh.services';
 import amisMapperService from '../services/amis-mapper.services';
 import amisService from '../services/amis.services';
 import retailBillSyncService from '../services/retail-bill-sync.services';
+import logger from '../utils/logger';
 
 /**
  * Controller for Nhanh.vn OAuth and API integration

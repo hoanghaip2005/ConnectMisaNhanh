@@ -136,7 +136,7 @@ app.listen(PORT, () => {
     // Start AMIS token auto-refresh
     amisTokenManager.startAutoRefresh();
 
-    // Start retail bill sync cron job (runs at 00:30 daily)
+    // Start retail bill sync cron job (runs at 16:00 daily)
     retailBillSyncService.startCronJob();
 });
 

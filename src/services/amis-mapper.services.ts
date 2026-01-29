@@ -39,8 +39,9 @@ export class AmisMapperService {
      * Chuyển đổi transformed order sang AMIS voucher
      * @param transformedOrder - Order đã transform từ Nhanh.vn
      * @param invNo - Số hóa đơn (optional)
+     * @param saleChannel - Kênh bán hàng (42 = Shopee, khác = kênh khác)
      */
-    public mapToAmisVoucher(transformedOrder: TransformedOrder, invNo?: string): SaVoucher {
+    public mapToAmisVoucher(transformedOrder: TransformedOrder, invNo?: string, saleChannel?: number): SaVoucher {
         const { orderId, data } = transformedOrder;
 
         if (!data || data.length === 0) {
@@ -48,6 +49,13 @@ export class AmisMapperService {
         }
 
         const firstRow = data[0];
+
+        // Xác định mã khách hàng dựa vào kênh bán
+        // Shopee (saleChannel = 42) → KH00509
+        // Kênh khác → KH000002
+        const accountObjectId = saleChannel === 42 ? '64745b34-914a-44db-88c7-d37fabcadefd' : 'c47e72a9-288d-4b7c-ba14-8aef0c046550';
+        const accountObjectCode = saleChannel === 42 ? 'KH00509' : 'KH000002';
+        const accountObjectType = saleChannel === 42 ? 'KHÁCH LẺ SHOPEE' : 'Khách lẻ';
 
         // Tính tổng tiền
         let totalSaleAmount = 0;      // Tổng tiền hàng (chưa thuế)
@@ -86,19 +94,26 @@ export class AmisMapperService {
 
         // Map chi tiết sản phẩm
         const details: SaVoucherDetail[] = data.map((row, index) => {
-            // totalAfterDiscount từ Nhanh.vn đã bao gồm VAT, cần chia 1.08 để lấy giá trước VAT
-            const amountBeforeVat = row.totalAfterDiscount / 1.08;
+            // Xác định thuế VAT dựa vào mã sản phẩm
+            const vatRate = row.productCode === 'CK100210' ? 5 : 8;
+            const vatDivisor = 1 + (vatRate / 100); // 1.05 hoặc 1.08
+            
+            // totalAfterDiscount từ Nhanh.vn đã bao gồm VAT
+            const amountBeforeVat = row.totalAfterDiscount / vatDivisor;
             // Đơn giá = thành tiền / số lượng
             const unitPrice = row.productQuantity > 0 ? amountBeforeVat / row.productQuantity : 0;
-            // Thuế GTGT 8%
-            const vatAmount = amountBeforeVat * 0.08;
+            // Thuế GTGT
+            const vatAmount = amountBeforeVat * (vatRate / 100);
 
             return {
                 inventory_item_code: row.productCode,
                 inventory_item_name: row.productName,
                 description: row.productName,  // Description là tên hàng
                 inventory_item_type: 2, // Dịch vụ
-                stock_code: 'KHO01',
+                account_object_id: accountObjectId,
+                account_object_code: accountObjectCode,
+                stock_id: 'a84bf448-c6b4-4365-8a81-a403ae0a298a',
+                stock_code: 'KCT001',
                 stock_name: 'Kho chính',
                 debit_account: '131',
                 credit_account: '5111',
@@ -113,7 +128,7 @@ export class AmisMapperService {
                 discount_rate: 0,                     // Không có chiết khấu
                 discount_amount_oc: 0,                // Không có chiết khấu
                 discount_amount: 0,                   // Không có chiết khấu
-                vat_rate: 8,                          // Thuế GTGT 8%
+                vat_rate: vatRate,                    // Thuế GTGT: 5% hoặc 8%
                 vat_amount_oc: vatAmount,             // Tiền thuế
                 vat_amount: vatAmount,                // Tiền thuế quy đổi
                 main_convert_rate: 1,
@@ -128,13 +143,46 @@ export class AmisMapperService {
             org_refid: orgRefId,
             org_refno: `BH${orderId}`,
             branch_id: this.branchId,
-            account_object_code: 'KH00509',  // Mã khách hàng mặc định
+            account_object_id: accountObjectId,      // ID khách hàng
+            account_object_code: accountObjectCode,  // KH00509 (Shopee) hoặc KH000002 (khác)
             account_object_name: accountObjectName,
-            payer: 'KHÁCH LẺ SHOPEE',  // Người liên hệ mặc định
+            payer: accountObjectType,  // "KHÁCH LẺ SHOPEE" hoặc "Khách lẻ"
             journal_memo: journalMemo,  // Diễn giải
             currency_id: 'VND',
             exchange_rate: 1,
-            is_sale_with_outward: false,
+            is_sale_with_outward: true,        // ✅ Xuất kho khi bán hàng
+            include_invoice: 1,                // ✅ Bao gồm hóa đơn
+            sa_invoice: {                      // ✅ Thông tin hóa đơn (copy từ voucher chính)
+                account_object_id: accountObjectId,
+                account_object_code: accountObjectCode,
+                account_object_name: accountObjectName,
+                branch_id: this.branchId,
+                buyer: accountObjectType,      // Người mua hàng
+                currency_id: 'VND',
+                exchange_rate: 1,
+                is_invoice_machine: true,
+                reftype: 3560,                 // 3560: Hóa đơn bán hàng hóa, dịch vụ trong nước
+                total_sale_amount_oc: totalSaleAmount,
+                total_sale_amount: totalSaleAmount,
+                total_amount_oc: totalAmount,
+                total_amount: totalAmount,
+                total_discount_amount_oc: totalDiscountAmount,
+                total_discount_amount: totalDiscountAmount,
+                total_vat_amount_oc: totalVatAmount,
+                total_vat_amount: totalVatAmount
+            },
+            in_outward: {                      // ✅ Thông tin phiếu xuất kho (copy từ voucher chính)
+                account_object_id: accountObjectId,
+                account_object_code: accountObjectCode,
+                account_object_name: accountObjectName,
+                branch_id: this.branchId,
+                contact_name: accountObjectType, // Người liên hệ
+                journal_memo: journalMemo,
+                posted_date: currentDateTime,
+                refdate: currentDateTime,
+                in_reforder: currentDateTime,  // Giờ nhập xuất kho
+                reftype: 2020                  // 2020: Xuất kho bán hàng
+            },
             posted_date: currentDateTime,  // Thời gian lập chứng từ
             refdate: currentDateTime,      // Thời gian lập chứng từ
             reftype: 3530, // Bán hàng hóa, dịch vụ trong nước chưa thu tiền
@@ -179,18 +227,30 @@ export class AmisMapperService {
 
         // Map chi tiết sản phẩm
         const details: SaVoucherDetail[] = bill.products.map((product: any, index: number) => {
+            // Xác định thuế VAT dựa vào mã sản phẩm
+            const vatRate = product.code === 'CK100210' ? 5 : 8;
+            const vatDivisor = 1 + (vatRate / 100); // 1.05 hoặc 1.08
+            
             // Tính tiền trước VAT từ amount (amount đã bao gồm VAT)
-            const amountBeforeVat = product.amount / 1.08;
+            const amountBeforeVat = product.amount / vatDivisor;
             const unitPrice = product.quantity > 0 ? amountBeforeVat / product.quantity : 0;
-            const vatAmount = amountBeforeVat * 0.08;
+            const vatAmount = amountBeforeVat * (vatRate / 100);
 
             totalSaleAmount += amountBeforeVat;
             totalVatAmount += vatAmount;
 
             return {
+                inventory_item_code: product.code,        // ✅ Thêm mã hàng từ product.code
+                inventory_item_name: product.name,        // ✅ Thêm tên hàng
                 description: product.name,
+                inventory_item_type: 2,                   // ✅ Loại hàng hóa: 2 = Dịch vụ
+                account_object_id: 'c47e72a9-288d-4b7c-ba14-8aef0c046550',
+                account_object_code: 'KH000002',
                 debit_account: '131',
                 credit_account: '5111',
+                stock_id: 'a84bf448-c6b4-4365-8a81-a403ae0a298a',
+                stock_code: 'KCT001',
+                stock_name: 'Kho mặc định',              // ✅ Tên kho
                 unit_name: 'Cái',
                 main_unit_name: 'Cái',
                 main_unit_price: unitPrice,
@@ -202,9 +262,9 @@ export class AmisMapperService {
                 discount_rate: 0,
                 discount_amount_oc: 0,
                 discount_amount: 0,
-                vat_rate: 8,
-                vat_amount_oc: vatAmount,
-                vat_amount: vatAmount,
+                vat_rate: vatRate,              // Thuế GTGT: 5% hoặc 8%
+                vat_amount_oc: vatAmount,       // Tiền thuế
+                vat_amount: vatAmount,          // Tiền thuế quy đổi
                 main_convert_rate: 1,
                 sort_order: index + 1,
                 exchange_rate_operator: '*'
@@ -225,21 +285,60 @@ export class AmisMapperService {
 
         const currentDateTime = this.getCurrentDateTime();
 
+        // Xác định các giá trị dựa vào billType
+        const isSaleWithOutward = billType === 2; // true cho bán hàng (xuất kho), false cho trả hàng (nhập kho)
+        const includeInvoice = billType === 2 ? 1 : 0; // Chỉ bao gồm hóa đơn khi bán hàng
+        const inOutwardReftype = billType === 2 ? 2020 : 2010; // 2020: Xuất kho bán hàng, 2010: Nhập kho trả hàng
+        const voucherReftype = billType === 2 ? 3530 : 3520; // 3530: Bán hàng chưa thu tiền, 3520: Trả hàng
+
         const voucher: SaVoucher = {
             voucher_type: voucherType,
             org_refid: orgRefId,
             org_refno: invoiceNo,
             branch_id: this.branchId,
+            account_object_id: 'c47e72a9-288d-4b7c-ba14-8aef0c046550',  // ID khách hàng KH000002
             account_object_code: 'KH000002',  // Mã khách hàng mặc định cho hoá đơn bán lẻ
             account_object_name: accountObjectName,
             payer: accountObjectName,  // Người liên hệ là tên khách hàng
             journal_memo: journalMemo,
             currency_id: 'VND',
             exchange_rate: 1,
-            is_sale_with_outward: false,
+            is_sale_with_outward: isSaleWithOutward,   // ✅ true: Xuất kho (bán hàng), false: Nhập kho (trả hàng)
+            include_invoice: includeInvoice,           // ✅ 1: Bao gồm hóa đơn (bán hàng), 0: Không có (trả hàng)
+            sa_invoice: billType === 2 ? {             // ✅ Chỉ có sa_invoice khi bán hàng
+                account_object_id: 'c47e72a9-288d-4b7c-ba14-8aef0c046550',
+                account_object_code: 'KH000002',
+                account_object_name: accountObjectName,
+                branch_id: this.branchId,
+                buyer: accountObjectName,      // Người mua hàng
+                currency_id: 'VND',
+                exchange_rate: 1,
+                is_invoice_machine: true,
+                reftype: 3560,                 // 3560: Hóa đơn bán hàng hóa, dịch vụ trong nước
+                total_sale_amount_oc: totalSaleAmount,
+                total_sale_amount: totalSaleAmount,
+                total_amount_oc: totalAmount,
+                total_amount: totalAmount,
+                total_discount_amount_oc: 0,
+                total_discount_amount: 0,
+                total_vat_amount_oc: totalVatAmount,
+                total_vat_amount: totalVatAmount
+            } : undefined,
+            in_outward: {                              // ✅ Thông tin phiếu xuất/nhập kho
+                account_object_id: 'c47e72a9-288d-4b7c-ba14-8aef0c046550',
+                account_object_code: 'KH000002',
+                account_object_name: accountObjectName,
+                branch_id: this.branchId,
+                contact_name: accountObjectName, // Người liên hệ
+                journal_memo: journalMemo,
+                posted_date: currentDateTime,
+                refdate: currentDateTime,
+                in_reforder: currentDateTime,  // Giờ nhập xuất kho
+                reftype: inOutwardReftype      // 2020: Xuất kho bán hàng, 2010: Nhập kho trả hàng
+            },
             posted_date: currentDateTime,
             refdate: currentDateTime,
-            reftype: 3530,
+            reftype: voucherReftype,           // 3530: Bán hàng chưa thu tiền, 3520: Trả hàng
             total_sale_amount_oc: totalSaleAmount,
             total_sale_amount: totalSaleAmount,
             total_amount_oc: totalAmount,

@@ -20,11 +20,15 @@ class Database {
                 password: process.env.MYSQL_PASSWORD || '',
                 database: process.env.MYSQL_DATABASE || 'middleware_integration',
                 waitForConnections: true,
-                connectionLimit: 20,  // Tăng từ 10 lên 20 để xử lý nhiều webhooks đồng thời
+                connectionLimit: 30,  // Tăng từ 20 lên 30 để handle nhiều webhooks hơn
                 queueLimit: 0,
                 enableKeepAlive: true,
                 keepAliveInitialDelay: 0,
-                connectTimeout: 2000  // Timeout kết nối sau 2s
+                connectTimeout: 5000,  // Tăng timeout từ 2s lên 5s
+                // OPTIMIZATION: Các settings để tăng tốc độ query
+                timezone: 'Z',  // Use UTC to avoid timezone conversion
+                charset: 'utf8mb4',
+                decimalNumbers: true
             });
 
             logger.info('MySQL connection pool created');

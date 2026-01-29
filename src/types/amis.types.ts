@@ -173,6 +173,63 @@ export interface SaVoucherDetail {
 }
 
 /**
+ * Thông tin hóa đơn (sa_invoice)
+ * Khi include_invoice = 1, object này sẽ chứa thông tin hóa đơn
+ */
+export interface SaInvoice {
+    account_object_address?: string;      // Địa chỉ khách hàng
+    account_object_id?: string;           // ID khách hàng (GUID)
+    account_object_code?: string;         // Mã khách hàng
+    account_object_name?: string;         // Tên khách hàng
+    account_object_tax_code?: string;     // Mã số thuế khách hàng
+    branch_id?: string;                   // Mã chi nhánh
+    buyer?: string;                       // Người mua hàng
+    currency_id?: string;                 // Loại tiền
+    discount_rate_voucher?: number;       // Tỷ lệ chiết khấu theo mặt hàng
+    discount_type?: number;               // Loại chiết khấu (0,1,2,3)
+    employee_code?: string;               // Mã nhân viên bán hàng
+    employee_name?: string;               // Tên nhân viên
+    exchange_rate?: number;               // Tỷ giá hối đoái
+    inv_date?: string;                    // Ngày hóa đơn (DateTime) - required
+    inv_no?: string;                      // Số hóa đơn (bắt buộc) - required
+    inv_series?: string;                  // Ký hiệu hóa đơn (bắt buộc) - required
+    inv_template_no?: string;             // Mẫu số hóa đơn (bắt buộc) - required
+    inv_type_id?: number;                 // Loại hóa đơn (1-6) - required
+    is_invoice_machine?: boolean;         // Là hóa đơn từ máy tính tiền
+    payment_method?: string;              // Hình thức thanh toán
+    reftype?: number;                     // Loại chứng từ (3560) - required
+    total_sale_amount_oc?: number;        // Tổng tiền hàng nguyên tệ - required
+    total_sale_amount?: number;           // Tổng tiền hàng quy đổi - required
+    total_amount_oc?: number;             // Tổng tiền thanh toán nguyên tệ - required
+    total_amount?: number;                // Tổng tiền thanh toán quy đổi - required
+    total_discount_amount_oc?: number;    // Chiết khấu nguyên tệ - required
+    total_discount_amount?: number;       // Chiết khấu quy đổi - required
+    total_vat_amount_oc?: number;         // Thuế GTGT nguyên tệ - required
+    total_vat_amount?: number;            // Thuế GTGT quy đổi - required
+}
+
+/**
+ * Thông tin phiếu xuất kho (in_outward)
+ * Khi is_sale_with_outward = true, object này sẽ chứa thông tin xuất kho
+ */
+export interface InOutward {
+    account_object_address?: string;      // Địa chỉ/bộ phận
+    account_object_id?: string;           // ID đối tượng (GUID)
+    account_object_code?: string;         // Mã đối tượng
+    account_object_name?: string;         // Tên đối tượng
+    branch_id?: string;                   // Mã chi nhánh - required
+    contact_name?: string;                // Tên người nhận/bộ phận/cửa
+    employee_code?: string;               // Mã nhân viên
+    employee_name?: string;               // Tên nhân viên
+    in_reforder?: string;                 // Giờ nhập xuất kho - required
+    inventory_posted_date?: string;       // Ngày ghi sổ kho
+    journal_memo?: string;                // Lý do/về việc
+    posted_date?: string;                 // Ngày hạch toán - required
+    refdate?: string;                     // Ngày chứng từ - required
+    reftype?: number;                     // Loại chứng từ (2020: Xuất kho bán hàng) - required
+}
+
+/**
  * Chứng từ bán hàng chính (sa_voucher)
  */
 export interface SaVoucher {
@@ -194,6 +251,8 @@ export interface SaVoucher {
     employee_code?: string;               // Mã NV bán hàng
     employee_name?: string;               // Tên nhân viên
     include_invoice?: number;             // Có đính kèm hóa đơn: 0,1,2
+    sa_invoice?: SaInvoice;               // ✅ Thông tin hóa đơn (khi include_invoice = 1)
+    in_outward?: InOutward;               // ✅ Thông tin phiếu xuất kho (khi is_sale_with_outward = true)
     in_reforder?: string;                 // Giờ nhập xuất (DateTime)
     inv_date?: string;                    // Ngày hóa đơn (DateTime)
     inv_no?: string;                      // Số hóa đơn
