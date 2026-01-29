@@ -33,14 +33,14 @@ class WebhookQueueService {
         try {
             // OPTIMIZATION: Loại bỏ transaction để tăng tốc độ response
             // Trade-off: Có thể bị race condition trong trường hợp cực hiếm (2 webhook cùng lúc)
-            
+
             // 1. Check xem order đã được xử lý chưa (< 10ms với index)
             const [existing] = await db.query<any[]>(
                 'SELECT 1 FROM processed_orders WHERE order_id = ? LIMIT 1',
                 [data.orderId]
             );
 
-            if (existing.length > 0) {
+            if (existing && Array.isArray(existing) && existing.length > 0) {
                 logger.info(`Order ${data.orderId} already processed - skipping webhook`);
                 return { isNew: false };
             }
@@ -55,7 +55,7 @@ class WebhookQueueService {
             );
 
             const queueId = result.insertId;
-            
+
             if (queueId > 0) {
                 logger.info(`Webhook enqueued: order ${data.orderId}, queue ID ${queueId}`);
                 return { isNew: true, queueId };
