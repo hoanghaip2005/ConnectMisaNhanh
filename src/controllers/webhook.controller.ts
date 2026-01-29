@@ -45,12 +45,8 @@ class WebhookController {
      * 
      * IMPORTANT: Trả về response ngay lập tức để tránh timeout
      * Lưu vào database và xử lý background
-     * 
-     * OPTIMIZATION: Giới hạn thời gian lưu vào DB < 2 giây
      */
     public async handleWebhook(req: Request, res: Response): Promise<void> {
-        const startTime = Date.now();
-
         try {
             const { event, businessId, data } = req.body;
 
@@ -65,8 +61,6 @@ class WebhookController {
 
             // Chỉ xử lý order events
             if (event !== 'orderAdd' && event !== 'orderUpdate') {
-                const responseTime = Date.now() - startTime;
-                logger.info(`Webhook response time: ${responseTime}ms (event not supported)`);
                 res.status(200).json({
                     success: true,
                     message: 'Event not supported',
@@ -79,8 +73,6 @@ class WebhookController {
             const orderId = data?.info?.id || data?.orderId || data?.id || req.body.id || req.body.orderId;
 
             if (!orderId) {
-                const responseTime = Date.now() - startTime;
-                logger.info(`Webhook response time: ${responseTime}ms (no orderId)`);
                 res.status(200).json({
                     success: true,
                     message: 'No orderId found in webhook'
@@ -88,8 +80,7 @@ class WebhookController {
                 return;
             }
 
-            // LƯU VÀO DATABASE + CHECK DUPLICATE
-            // CRITICAL: Phải hoàn thành trong < 2 giây
+            // LƯU VÀO DATABASE + CHECK DUPLICATE (< 50ms)
             const { isNew, queueId } = await webhookQueueService.enqueue({
                 event,
                 orderId,
@@ -97,23 +88,13 @@ class WebhookController {
                 payload: req.body
             });
 
-            const responseTime = Date.now() - startTime;
-
-            // WARNING: Nếu response time > 2 giây
-            if (responseTime > 2000) {
-                logger.warn(`⚠️ SLOW WEBHOOK RESPONSE: ${responseTime}ms for order ${orderId}`);
-            } else {
-                logger.info(`Webhook response time: ${responseTime}ms for order ${orderId}`);
-            }
-
             // TRẢ VỀ RESPONSE NGAY LẬP TỨC
             res.status(200).json({
                 success: true,
                 message: isNew ? 'Webhook queued for processing' : 'Webhook already processed',
                 orderId,
                 queueId: isNew ? queueId : undefined,
-                receivedAt: new Date().toISOString(),
-                responseTime: `${responseTime}ms`
+                receivedAt: new Date().toISOString()
             });
 
             // XỬ LÝ TRONG BACKGROUND nếu là webhook mới
@@ -203,11 +184,11 @@ class WebhookController {
             // Transform đơn hàng
             const transformedRows = transformService.transformSingleOrder(order);
 
-            // Map sang format AMIS (truyền saleChannel để phân biệt Shopee vs kênh khác)
+            // Map sang format AMIS
             const voucher = amisMapperService.mapToAmisVoucher({
                 orderId: orderId,
                 data: transformedRows
-            }, undefined, saleChannel);  // undefined = invNo, saleChannel để phân biệt KH00509 vs KH000002
+            });
 
             // Lấy access token hiện tại
             const accessToken = process.env.MISA_ACCESS_TOKEN;
