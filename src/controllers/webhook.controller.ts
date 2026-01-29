@@ -200,6 +200,12 @@ class WebhookController {
 
             const order = orderResponse.data;
 
+            // Nếu saleChannel chưa được truyền vào, lấy từ order
+            if (!saleChannel) {
+                saleChannel = order.channel?.saleChannel || order.saleChannel;
+                logger.info(`Order ${orderId} - saleChannel from API: ${saleChannel}`);
+            }
+
             // Transform đơn hàng
             const transformedRows = transformService.transformSingleOrder(order);
 
