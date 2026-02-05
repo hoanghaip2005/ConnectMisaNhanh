@@ -1,4 +1,6 @@
 import { SaVoucher, SaVoucherDetail } from '../types/amis.types';
+import inventoryCache from './inventory-cache.services';
+import logger from '../utils/logger';
 
 /**
  * Service chuyển đổi dữ liệu transform sang AMIS voucher
@@ -41,7 +43,7 @@ export class AmisMapperService {
      * @param invNo - Số hóa đơn (optional)
      * @param saleChannel - Kênh bán hàng (42 = Shopee, khác = kênh khác)
      */
-    public mapToAmisVoucher(transformedOrder: TransformedOrder, invNo?: string, saleChannel?: number): SaVoucher {
+    public async mapToAmisVoucher(transformedOrder: TransformedOrder, invNo?: string, saleChannel?: number): Promise<SaVoucher> {
         const { orderId, data } = transformedOrder;
 
         if (!data || data.length === 0) {
@@ -49,6 +51,23 @@ export class AmisMapperService {
         }
 
         const firstRow = data[0];
+
+        // Kiểm tra tất cả mã vật tư từ Nhanh.vn có tồn tại trong MISA không
+        const productCodes = data.map(row => row.productCode);
+        const inventoryCheckResult = await inventoryCache.checkMultipleInventoryCodes(productCodes);
+        
+        // Log các mã không tồn tại
+        productCodes.forEach(code => {
+            const exists = inventoryCheckResult.get(code);
+            if (!exists) {
+                logger.warn(`Product code ${code} from Nhanh.vn not found in MISA AMIS, will use empty code`);
+            } else {
+                logger.info(`Product code ${code} found in MISA:`, {
+                    id: exists.id,
+                    name: exists.name
+                });
+            }
+        });
 
         // Xác định mã khách hàng dựa vào kênh bán
         // Shopee (saleChannel = 42) → KH00509
@@ -94,6 +113,14 @@ export class AmisMapperService {
 
         // Map chi tiết sản phẩm
         const details: SaVoucherDetail[] = data.map((row, index) => {
+            // Kiểm tra mã vật tư có tồn tại trong MISA không
+            const inventoryExists = inventoryCheckResult.get(row.productCode);
+            const finalProductCode = inventoryExists ? row.productCode : ''; // Để trống nếu không tồn tại
+            
+            if (!inventoryExists) {
+                logger.warn(`Order ${orderId} - Product ${row.productCode} not found in MISA, using empty code`);
+            }
+            
             // Xác định thuế VAT dựa vào mã sản phẩm
             const vatRate = row.productCode === 'CK100210' ? 5 : 8;
             const vatDivisor = 1 + (vatRate / 100); // 1.05 hoặc 1.08
@@ -106,7 +133,7 @@ export class AmisMapperService {
             const vatAmount = amountBeforeVat * (vatRate / 100);
 
             return {
-                inventory_item_code: row.productCode,
+                inventory_item_code: finalProductCode,  // Để trống nếu không tồn tại trong MISA
                 inventory_item_name: row.productName,
                 description: row.productName,  // Description là tên hàng
                 inventory_item_type: 2, // Dịch vụ
@@ -205,7 +232,7 @@ export class AmisMapperService {
      * @param bill - Hoá đơn bán lẻ từ Nhanh.vn
      * @param invNo - Số hóa đơn (optional)
      */
-    public mapRetailBillToAmisVoucher(bill: any, invNo?: string): SaVoucher {
+    public async mapRetailBillToAmisVoucher(bill: any, invNo?: string): Promise<SaVoucher> {
         if (!bill || !bill.products || bill.products.length === 0) {
             throw new Error('No product data in retail bill');
         }
@@ -213,6 +240,18 @@ export class AmisMapperService {
         const billId = bill.id;
         const billType = bill.type; // 1 = Trả hàng, 2 = Xuất kho bán lẻ
         const customerName = bill.customer?.name || 'Khách lẻ';
+
+        // Kiểm tra tất cả mã vật tư từ Nhanh.vn có tồn tại trong MISA không
+        const productCodes = bill.products.map((p: any) => p.code);
+        const inventoryCheckResult = await inventoryCache.checkMultipleInventoryCodes(productCodes);
+        
+        // Log các mã không tồn tại
+        productCodes.forEach((code: string) => {
+            const exists = inventoryCheckResult.get(code);
+            if (!exists) {
+                logger.warn(`Product code ${code} from retail bill ${billId} not found in MISA AMIS, will use empty code`);
+            }
+        });
 
         // Xác định voucher_type và prefix dựa vào bill.type
         // Type 1 (Trả hàng) -> voucher_type = 12 (Hàng bán bị trả lại)
@@ -227,6 +266,14 @@ export class AmisMapperService {
 
         // Map chi tiết sản phẩm
         const details: SaVoucherDetail[] = bill.products.map((product: any, index: number) => {
+            // Kiểm tra mã vật tư có tồn tại trong MISA không
+            const inventoryExists = inventoryCheckResult.get(product.code);
+            const finalProductCode = inventoryExists ? product.code : ''; // Để trống nếu không tồn tại
+            
+            if (!inventoryExists) {
+                logger.warn(`Bill ${billId} - Product ${product.code} not found in MISA, using empty code`);
+            }
+            
             // Xác định thuế VAT dựa vào mã sản phẩm
             const vatRate = product.code === 'CK100210' ? 5 : 8;
             const vatDivisor = 1 + (vatRate / 100); // 1.05 hoặc 1.08
@@ -240,7 +287,7 @@ export class AmisMapperService {
             totalVatAmount += vatAmount;
 
             return {
-                inventory_item_code: product.code,        // ✅ Thêm mã hàng từ product.code
+                inventory_item_code: finalProductCode,    // Để trống nếu không tồn tại trong MISA
                 inventory_item_name: product.name,        // ✅ Thêm tên hàng
                 description: product.name,
                 inventory_item_type: 2,                   // ✅ Loại hàng hóa: 2 = Dịch vụ

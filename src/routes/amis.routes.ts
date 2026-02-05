@@ -6,7 +6,8 @@ import {
     checkCallbackHistory,
     refreshToken,
     getCurrentToken,
-    deleteVoucher
+    deleteVoucher,
+    getInventoryItems
 } from '../controllers/amis.controllers';
 
 const router = Router();
@@ -36,6 +37,9 @@ router.post('/save-voucher', saveVoucher);
 
 // Xóa chứng từ đã gửi lên AMIS
 router.delete('/delete-voucher', deleteVoucher);
+
+// Lấy danh sách vật tư/hàng hóa
+router.get('/inventory-items', getInventoryItems);
 
 // Kiểm tra lịch sử callback
 router.get('/check-callback', checkCallbackHistory);

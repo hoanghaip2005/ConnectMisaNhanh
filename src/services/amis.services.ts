@@ -339,6 +339,68 @@ export class AmisService {
             }
         }
     }
+
+    /**
+     * Lấy danh sách vật tư/hàng hóa từ MISA AMIS
+     * POST /apir/sync/actopen/get_dictionary
+     * @param accessToken - Token xác thực
+     * @param dataType - Loại dữ liệu (2 = vật tư)
+     * @param skip - Số lượng bỏ qua (phân trang)
+     * @param take - Số lượng lấy về (tối đa 1000)
+     * @param lastSyncTime - Thời gian đồng bộ lần cuối (timestamp)
+     */
+    public async getInventoryItems(
+        accessToken: string,
+        skip: number = 0,
+        take: number = 1000,
+        lastSyncTime?: number
+    ): Promise<any> {
+        try {
+            const url = '/apir/sync/actopen/get_dictionary';
+            
+            const requestBody: any = {
+                data_type: 2, // 2 = Vật tư/hàng hóa
+                skip: skip,
+                take: take,
+                app_id: this.appId
+            };
+
+            // Thêm last_sync_time nếu có
+            if (lastSyncTime) {
+                requestBody.last_sync_time = lastSyncTime;
+            }
+
+            logger.info('Getting inventory items from MISA AMIS', {
+                skip,
+                take,
+                lastSyncTime: lastSyncTime || 'all'
+            });
+
+            const response = await this.axiosInstance.post(url, requestBody, {
+                headers: {
+                    'X-MISA-AccessToken': accessToken
+                }
+            });
+
+            if (response.data && response.data.Success) {
+                logger.info('Inventory items retrieved successfully', {
+                    count: response.data.Data?.length || 0
+                });
+                return response.data;
+            } else {
+                logger.error('Failed to get inventory items', {
+                    error: response.data?.ErrorMessage
+                });
+                throw new Error(response.data?.ErrorMessage || 'Failed to get inventory items');
+            }
+        } catch (error: any) {
+            logger.error('Error getting inventory items from MISA AMIS', {
+                error: error.message,
+                response: error.response?.data
+            });
+            throw error;
+        }
+    }
 }
 
 export default new AmisService();

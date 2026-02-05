@@ -201,6 +201,60 @@ export const checkCallbackHistory = async (req: Request, res: Response) => {
 };
 
 /**
+ * Lấy danh sách vật tư/hàng hóa từ MISA AMIS
+ * GET /api/amis/inventory-items
+ */
+export const getInventoryItems = async (req: Request, res: Response) => {
+    try {
+        const { skip, take, lastSyncTime } = req.query;
+
+        // Parse parameters
+        const skipNum = skip ? parseInt(skip as string) : 0;
+        const takeNum = take ? parseInt(take as string) : 1000;
+        const lastSync = lastSyncTime ? parseInt(lastSyncTime as string) : undefined;
+
+        // Validate parameters
+        if (takeNum > 1000) {
+            return res.status(400).json({
+                success: false,
+                error: 'take parameter cannot exceed 1000'
+            });
+        }
+
+        // Lấy access token
+        const accessToken = await amisTokenManager.getValidToken();
+
+        if (!accessToken) {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to get access token'
+            });
+        }
+
+        // Lấy danh sách vật tư
+        const result = await amisService.getInventoryItems(
+            accessToken,
+            skipNum,
+            takeNum,
+            lastSync
+        );
+
+        res.json({
+            success: true,
+            count: result.Data?.length || 0,
+            data: result.Data || [],
+            message: result.ErrorMessage || null
+        });
+    } catch (error: any) {
+        logger.error('Get inventory items error', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
+
+/**
  * Xóa chứng từ đã gửi lên AMIS
  * DELETE /api/amis/delete-voucher
  */

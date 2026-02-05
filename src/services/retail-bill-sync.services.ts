@@ -54,14 +54,14 @@ class RetailBillSyncService {
         try {
             // Tính timestamp: hôm qua 16:00 và hôm nay 16:00 (THEO GIỜ VIỆT NAM UTC+7)
             const now = new Date();
-            
+
             // Chuyển sang giờ Việt Nam
             const vnNow = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
-            
+
             // Hôm nay 16:00 VN
             const todayAt16 = new Date(vnNow);
             todayAt16.setHours(16, 0, 0, 0);
-            
+
             // Hôm qua 16:00 VN
             const yesterdayAt16 = new Date(todayAt16);
             yesterdayAt16.setDate(yesterdayAt16.getDate() - 1);
@@ -139,7 +139,7 @@ class RetailBillSyncService {
                     logger.info(`🔄 Processing bill ${bill.id} (type=${bill.type}, createdAt=${new Date(billCreatedAt * 1000).toISOString()})...`);
 
                     // Map sang format AMIS
-                    const voucher = amisMapperService.mapRetailBillToAmisVoucher(bill);
+                    const voucher = await amisMapperService.mapRetailBillToAmisVoucher(bill);
 
                     // Gửi lên MISA
                     const amisResponse = await amisService.saveVoucher([voucher], accessToken);
@@ -271,7 +271,7 @@ class RetailBillSyncService {
                     logger.info(`🔄 Processing bill ${bill.id} (type=${bill.type})...`);
 
                     // Map sang format AMIS
-                    const voucher = amisMapperService.mapRetailBillToAmisVoucher(bill);
+                    const voucher = await amisMapperService.mapRetailBillToAmisVoucher(bill);
 
                     // Gửi lên MISA
                     const amisResponse = await amisService.saveVoucher([voucher], accessToken);
@@ -398,7 +398,7 @@ class RetailBillSyncService {
                     logger.info(`🔄 Processing bill ${bill.id} (type=${bill.type})...`);
 
                     // Map sang format AMIS
-                    const voucher = amisMapperService.mapRetailBillToAmisVoucher(bill);
+                    const voucher = await amisMapperService.mapRetailBillToAmisVoucher(bill);
 
                     // Gửi lên MISA
                     const amisResponse = await amisService.saveVoucher([voucher], accessToken);

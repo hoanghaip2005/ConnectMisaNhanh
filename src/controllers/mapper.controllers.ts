@@ -30,7 +30,7 @@ export const testMapOrder = async (req: Request, res: Response) => {
         const transformedRows = await transformService.transformOrderToRows(response.data[0]);
 
         // 3. Map sang AMIS voucher
-        const voucher = amisMapperService.mapToAmisVoucher({
+        const voucher = await amisMapperService.mapToAmisVoucher({
             orderId: orderId,
             data: transformedRows
         });

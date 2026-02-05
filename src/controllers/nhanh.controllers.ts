@@ -402,7 +402,7 @@ export class NhanhController {
             for (const bill of bills) {
                 try {
                     // Map sang format AMIS
-                    const voucher = amisMapperService.mapRetailBillToAmisVoucher(bill);
+                    const voucher = await amisMapperService.mapRetailBillToAmisVoucher(bill);
 
                     // Gửi lên MISA
                     const amisResponse = await amisService.saveVoucher([voucher], accessToken);
@@ -485,7 +485,7 @@ export class NhanhController {
             const bill = billsResponse.data[0];
 
             // Map sang format AMIS
-            const voucher = amisMapperService.mapRetailBillToAmisVoucher(bill);
+            const voucher = await amisMapperService.mapRetailBillToAmisVoucher(bill);
 
             // Lấy access token
             const accessToken = process.env.MISA_ACCESS_TOKEN;

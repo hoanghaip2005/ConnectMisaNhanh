@@ -210,7 +210,7 @@ class WebhookController {
             const transformedRows = transformService.transformSingleOrder(order);
 
             // Map sang format AMIS (truyền saleChannel để phân biệt Shopee vs kênh khác)
-            const voucher = amisMapperService.mapToAmisVoucher({
+            const voucher = await amisMapperService.mapToAmisVoucher({
                 orderId: orderId,
                 data: transformedRows
             }, undefined, saleChannel);  // undefined = invNo, saleChannel để phân biệt KH00509 vs KH000002
