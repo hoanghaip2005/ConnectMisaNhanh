@@ -115,10 +115,11 @@ export class AmisMapperService {
         const details: SaVoucherDetail[] = data.map((row, index) => {
             // Kiểm tra mã vật tư có tồn tại trong MISA không
             const inventoryExists = inventoryCheckResult.get(row.productCode);
-            const finalProductCode = inventoryExists ? row.productCode : ''; // Để trống nếu không tồn tại
+            // Nếu không tồn tại trong MISA → giữ nguyên mã từ Nhanh.vn
+            const finalProductCode = row.productCode;
             
             if (!inventoryExists) {
-                logger.warn(`Order ${orderId} - Product ${row.productCode} not found in MISA, using empty code`);
+                logger.warn(`Order ${orderId} - Product ${row.productCode} not found in MISA, using Nhanh.vn code as-is`);
             }
             
             // Xác định thuế VAT dựa vào mã sản phẩm

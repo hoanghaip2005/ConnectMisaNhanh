@@ -24,7 +24,7 @@ class Database {
                 queueLimit: 0,
                 enableKeepAlive: true,
                 keepAliveInitialDelay: 0,
-                connectTimeout: 5000,  // Tăng timeout từ 2s lên 5s
+                connectTimeout: 2000,  // Giảm xuống 2s để không block quá 3s timeout của Nhanh.vn
                 // OPTIMIZATION: Các settings để tăng tốc độ query
                 timezone: 'Z',  // Use UTC to avoid timezone conversion
                 charset: 'utf8mb4',
