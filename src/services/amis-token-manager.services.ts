@@ -14,6 +14,7 @@ export class AmisTokenManager {
     private amisService: AmisService;
     private envPath: string;
     private refreshInterval: NodeJS.Timeout | null = null;
+    private tokenExpiredAt: Date | null = null; // Lưu thời điểm token hết hạn
 
     constructor() {
         this.amisService = new AmisService();
@@ -29,6 +30,11 @@ export class AmisTokenManager {
 
             // Lấy token mới
             const tokenData = await this.amisService.connect();
+
+            // Lưu thời điểm hết hạn (trừ 10 phút để refresh sớm)
+            if (tokenData.expired_time) {
+                this.tokenExpiredAt = new Date(new Date(tokenData.expired_time).getTime() - 10 * 60 * 1000);
+            }
 
             // Lưu vào .env
             this.updateEnvFile('MISA_ACCESS_TOKEN', tokenData.access_token);
@@ -125,13 +131,20 @@ export class AmisTokenManager {
     }
 
     /**
-     * Lấy token hiện tại, refresh nếu hết hạn
+     * Lấy token hiện tại, refresh nếu hết hạn hoặc sắp hết hạn
      */
     public async getValidToken(): Promise<string> {
         let token = process.env.MISA_ACCESS_TOKEN;
 
-        if (!token || token.trim() === '') {
-            logger.warn('No token found, fetching new one');
+        // Refresh nếu: không có token, token rỗng, hoặc đã quá thời điểm hết hạn
+        const isExpired = this.tokenExpiredAt && new Date() >= this.tokenExpiredAt;
+
+        if (!token || token.trim() === '' || isExpired) {
+            if (isExpired) {
+                logger.warn('MISA token expired or about to expire, refreshing...');
+            } else {
+                logger.warn('No token found, fetching new one');
+            }
             token = await this.refreshToken();
         }
 
