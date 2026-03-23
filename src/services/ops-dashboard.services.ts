@@ -46,6 +46,8 @@ interface LogStreamResponse {
 
 class OpsDashboardService {
     public async getOverview(limit: number = 25) {
+        const safeLimit = this.normalizeLimit(limit, 25);
+
         const queueSummaryRows = await db.query<QueueSummaryRow[]>(
             `SELECT
                 COUNT(*) AS total_queue,
@@ -74,16 +76,14 @@ class OpsDashboardService {
                 processed_at
              FROM webhook_queue
              ORDER BY created_at DESC
-             LIMIT ?`,
-            [limit]
+             LIMIT ${safeLimit}`
         );
 
         const recentProcessedOrders = await db.query<ProcessedOrderRow[]>(
             `SELECT id, order_id, created_at
              FROM processed_orders
              ORDER BY created_at DESC
-             LIMIT ?`,
-            [limit]
+             LIMIT ${safeLimit}`
         );
 
         const recentFailures = await db.query<QueueRow[]>(
@@ -225,6 +225,14 @@ class OpsDashboardService {
             path: logPath,
             filename: logPath ? path.basename(logPath) : null
         };
+    }
+
+    private normalizeLimit(value: number, fallbackValue: number): number {
+        if (!Number.isFinite(value) || value <= 0) {
+            return fallbackValue;
+        }
+
+        return Math.min(Math.floor(value), 100);
     }
 
     private async readLastLines(filePath: string, maxLines: number): Promise<string[]> {
