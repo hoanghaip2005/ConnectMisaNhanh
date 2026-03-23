@@ -6,12 +6,14 @@ import {
     renderOpsDashboardScript
 } from '../views/ops-dashboard.view';
 
-function parsePositiveInteger(input: string | undefined, fallbackValue: number): number {
-    if (!input) {
+function parsePositiveInteger(input: string | string[] | undefined, fallbackValue: number): number {
+    const normalizedInput = Array.isArray(input) ? input[0] : input;
+
+    if (!normalizedInput) {
         return fallbackValue;
     }
 
-    const parsed = parseInt(input, 10);
+    const parsed = parseInt(normalizedInput, 10);
 
     if (Number.isNaN(parsed) || parsed <= 0) {
         return fallbackValue;
