@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import helmet from 'helmet';
 import cors from 'cors';
 import apiRoutes from './routes/api.routes';
+import { opsPageRouter } from './routes/ops.routes';
 import amisTokenManager from './services/amis-token-manager.services';
 import retailBillSyncService from './services/retail-bill-sync.services';
 import logger from './utils/logger';
@@ -52,6 +53,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // API Routes
 app.use('/api', apiRoutes);
+app.use('/ops', opsPageRouter);
 
 // Block common scanner/bot paths
 const blockedPaths = [

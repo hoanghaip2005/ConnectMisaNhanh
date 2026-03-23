@@ -4,6 +4,7 @@ import webhookRoutes from './webhook.routes';
 import transformRoutes from './transform.routes';
 import amisRoutes from './amis.routes';
 import mapperRoutes from './mapper.routes';
+import opsApiRoutes from './ops.routes';
 
 const router = Router();
 
@@ -26,6 +27,9 @@ router.use('/amis', amisRoutes);
 
 // Mapper routes (test mapping Nhanh -> AMIS)
 router.use('/mapper', mapperRoutes);
+
+// Operations dashboard APIs
+router.use('/ops', opsApiRoutes);
 
 // Health check endpoint
 router.get('/health', (req, res) => {
