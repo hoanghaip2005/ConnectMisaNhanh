@@ -17,6 +17,10 @@ class InventoryCacheService {
         this.amisService = new AmisService();
     }
 
+    private normalizeCode(code: string | null | undefined): string {
+        return String(code || '').trim();
+    }
+
     /**
      * Load toàn bộ danh sách vật tư từ MISA AMIS
      */
@@ -47,19 +51,15 @@ class InventoryCacheService {
                     take
                 );
 
-                if (result.Data && Array.isArray(result.Data)) {
-                    // Parse JSON string nếu cần
-                    let items = result.Data;
-                    if (typeof result.Data === 'string') {
-                        items = JSON.parse(result.Data);
-                    }
-
+                if (Array.isArray(result.Data) && result.Data.length > 0) {
+                    const items = result.Data;
                     // Thêm vào map với key là inventory_item_code
                     for (const item of items) {
-                        if (item.inventory_item_code) {
-                            this.inventoryMap.set(item.inventory_item_code, {
+                        const normalizedCode = this.normalizeCode(item.inventory_item_code);
+                        if (normalizedCode) {
+                            this.inventoryMap.set(normalizedCode, {
                                 id: item.inventory_item_id,
-                                code: item.inventory_item_code,
+                                code: normalizedCode,
                                 name: item.inventory_item_name,
                                 unit_id: item.unit_id,
                                 unit_name: item.unit_name,
@@ -113,7 +113,7 @@ class InventoryCacheService {
      */
     public async checkInventoryCode(code: string): Promise<any | null> {
         await this.refreshCacheIfNeeded();
-        return this.inventoryMap.get(code) || null;
+        return this.inventoryMap.get(this.normalizeCode(code)) || null;
     }
 
     /**
@@ -126,7 +126,7 @@ class InventoryCacheService {
         
         const result = new Map<string, any | null>();
         for (const code of codes) {
-            result.set(code, this.inventoryMap.get(code) || null);
+            result.set(code, this.inventoryMap.get(this.normalizeCode(code)) || null);
         }
         
         return result;

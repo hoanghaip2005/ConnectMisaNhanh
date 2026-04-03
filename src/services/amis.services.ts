@@ -13,7 +13,9 @@ import {
     SaveVoucherResponse,
     SaVoucher,
     CheckCallbackRequest,
-    CheckCallbackResponse
+    CheckCallbackResponse,
+    AmisInventoryItem,
+    AmisInventoryItemsResponse
 } from '../types/amis.types';
 
 dotenv.config();
@@ -41,6 +43,23 @@ export class AmisService {
             },
             timeout: 30000
         });
+    }
+
+    private normalizeInventoryItemsData(data: unknown): AmisInventoryItem[] {
+        if (Array.isArray(data)) {
+            return data;
+        }
+
+        if (typeof data === 'string') {
+            const parsed = JSON.parse(data);
+            if (Array.isArray(parsed)) {
+                return parsed;
+            }
+
+            throw new Error('Invalid inventory data format returned by MISA');
+        }
+
+        return [];
     }
 
     /**
@@ -354,7 +373,7 @@ export class AmisService {
         skip: number = 0,
         take: number = 1000,
         lastSyncTime?: number
-    ): Promise<any> {
+    ): Promise<AmisInventoryItemsResponse> {
         try {
             const url = '/apir/sync/actopen/get_dictionary';
             
@@ -383,10 +402,14 @@ export class AmisService {
             });
 
             if (response.data && response.data.Success) {
+                const items = this.normalizeInventoryItemsData(response.data.Data);
                 logger.info('Inventory items retrieved successfully', {
-                    count: response.data.Data?.length || 0
+                    count: items.length
                 });
-                return response.data;
+                return {
+                    ...response.data,
+                    Data: items
+                };
             } else {
                 logger.error('Failed to get inventory items', {
                     error: response.data?.ErrorMessage

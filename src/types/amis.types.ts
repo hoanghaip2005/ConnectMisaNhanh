@@ -123,6 +123,31 @@ export interface CheckCallbackResponse {
 }
 
 /**
+ * Một vật tư/hàng hóa trả về từ get_dictionary
+ */
+export interface AmisInventoryItem {
+    inventory_item_id?: string;
+    inventory_item_code?: string;
+    inventory_item_name?: string;
+    unit_id?: string;
+    unit_name?: string;
+    tax_rate?: number;
+    default_stock_id?: string;
+    inactive?: boolean;
+    [key: string]: any;
+}
+
+/**
+ * Response từ get_dictionary sau khi đã normalize Data thành mảng
+ */
+export interface AmisInventoryItemsResponse {
+    Success: boolean;
+    ErrorCode?: string | null;
+    ErrorMessage?: string | null;
+    Data: AmisInventoryItem[];
+}
+
+/**
  * Chi tiết chứng từ bán hàng (sa_voucher)
  */
 export interface SaVoucherDetail {

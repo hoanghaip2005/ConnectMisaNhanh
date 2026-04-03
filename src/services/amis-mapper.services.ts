@@ -60,7 +60,7 @@ export class AmisMapperService {
         productCodes.forEach(code => {
             const exists = inventoryCheckResult.get(code);
             if (!exists) {
-                logger.warn(`Product code ${code} from Nhanh.vn not found in MISA AMIS, will use empty code`);
+                logger.warn(`Product code ${code} from Nhanh.vn not found in MISA AMIS, will use Nhanh.vn code as-is`);
             } else {
                 logger.info(`Product code ${code} found in MISA:`, {
                     id: exists.id,
@@ -134,7 +134,7 @@ export class AmisMapperService {
             const vatAmount = amountBeforeVat * (vatRate / 100);
 
             return {
-                inventory_item_code: finalProductCode,  // Để trống nếu không tồn tại trong MISA
+                inventory_item_code: finalProductCode,  // Giữ mã từ Nhanh.vn nếu không tồn tại trong MISA
                 inventory_item_name: row.productName,
                 description: row.productName,  // Description là tên hàng
                 inventory_item_type: 2, // Dịch vụ
@@ -250,7 +250,7 @@ export class AmisMapperService {
         productCodes.forEach((code: string) => {
             const exists = inventoryCheckResult.get(code);
             if (!exists) {
-                logger.warn(`Product code ${code} from retail bill ${billId} not found in MISA AMIS, will use empty code`);
+                logger.warn(`Product code ${code} from retail bill ${billId} not found in MISA AMIS, will use Nhanh.vn code as-is`);
             }
         });
 
@@ -269,10 +269,10 @@ export class AmisMapperService {
         const details: SaVoucherDetail[] = bill.products.map((product: any, index: number) => {
             // Kiểm tra mã vật tư có tồn tại trong MISA không
             const inventoryExists = inventoryCheckResult.get(product.code);
-            const finalProductCode = inventoryExists ? product.code : ''; // Để trống nếu không tồn tại
+            const finalProductCode = product.code; // Luôn giữ mã từ Nhanh.vn
             
             if (!inventoryExists) {
-                logger.warn(`Bill ${billId} - Product ${product.code} not found in MISA, using empty code`);
+                logger.warn(`Bill ${billId} - Product ${product.code} not found in MISA, using Nhanh.vn code as-is`);
             }
             
             // Xác định thuế VAT dựa vào mã sản phẩm
@@ -288,7 +288,7 @@ export class AmisMapperService {
             totalVatAmount += vatAmount;
 
             return {
-                inventory_item_code: finalProductCode,    // Để trống nếu không tồn tại trong MISA
+                inventory_item_code: finalProductCode,    // Giữ mã từ Nhanh.vn nếu không tồn tại trong MISA
                 inventory_item_name: product.name,        // ✅ Thêm tên hàng
                 description: product.name,
                 inventory_item_type: 2,                   // ✅ Loại hàng hóa: 2 = Dịch vụ
