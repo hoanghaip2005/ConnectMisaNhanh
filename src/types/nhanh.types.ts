@@ -97,6 +97,7 @@ export interface OrderHistoryRequest {
     filters: {
         orderIds: number[];      // Mảng ID đơn hàng, tối đa 100
         type?: string;           // logcarrier: Load lịch sử đơn hàng từ hãng vận chuyển
+        steps?: number[];        // Mảng hành động thao tác cần lọc (vd: [7] = Đổi trạng thái)
     };
 }
 

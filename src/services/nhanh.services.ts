@@ -9,6 +9,8 @@ import {
     OAuthUrlParams,
     OrderListRequest,
     OrderListResponse,
+    OrderHistoryRequest,
+    OrderHistoryResponse,
     RetailBillRequest,
     RetailBillResponse
 } from '../types/nhanh.types';// Load environment variables
@@ -234,9 +236,15 @@ export class NhanhService {
      * Lấy lịch sử thao tác đơn hàng
      * POST /v3.0/order/history
      * @param orderIds - Mảng ID đơn hàng (tối đa 100)
-     * @param type - Loại lịch sử (logcarrier: Load lịch sử từ hãng vận chuyển)
+     * @param options - Bộ lọc bổ sung: type, steps
      */
-    public async getOrderHistory(orderIds: number[], type?: string): Promise<any> {
+    public async getOrderHistory(
+        orderIds: number[],
+        options?: {
+            type?: string;
+            steps?: number[];
+        }
+    ): Promise<OrderHistoryResponse> {
         try {
             const accessToken = process.env.NHANH_ACCESS_TOKEN;
             const businessId = process.env.NHANH_BUSINESS_ID;
@@ -256,14 +264,18 @@ export class NhanhService {
 
             const url = `${this.config.baseUrl}/v${this.config.apiVersion}/order/history`;
 
-            const payload: any = {
+            const payload: OrderHistoryRequest = {
                 filters: {
                     orderIds
                 }
             };
 
-            if (type) {
-                payload.filters.type = type;
+            if (options?.type) {
+                payload.filters.type = options.type;
+            }
+
+            if (options?.steps && options.steps.length > 0) {
+                payload.filters.steps = options.steps;
             }
 
             const response = await this.axiosInstance.post(

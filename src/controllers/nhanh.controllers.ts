@@ -5,6 +5,9 @@ import amisService from '../services/amis.services';
 import retailBillSyncService from '../services/retail-bill-sync.services';
 import logger from '../utils/logger';
 
+const ORDER_STATUS_CHANGE_STEP = 7;
+const SUCCESS_STATUS = 60;
+
 /**
  * Controller for Nhanh.vn OAuth and API integration
  */
@@ -530,27 +533,25 @@ export class NhanhController {
                 return;
             }
 
-            const historyResponse = await nhanhService.getOrderHistory([orderId]);
+            const historyResponse = await nhanhService.getOrderHistory([orderId], {
+                steps: [ORDER_STATUS_CHANGE_STEP]
+            });
 
             if (historyResponse.code === 1) {
-                // Phân tích lịch sử
-                const history = historyResponse.data || [];
+                const history = (historyResponse.data || [])
+                    .filter((item: any) => item.orderId === orderId)
+                    .sort((a: any, b: any) => b.createdAt - a.createdAt);
 
-                // Kiểm tra xem đã từng có status 60 chưa
-                const hasStatus60Before = history.some((item: any) =>
-                    item.orderId === orderId && item.status?.new === 60
-                );
+                const latestStatusChange = history[0] || null;
+                const olderStatusChanges = history.slice(1);
+                const latestIsStatus60 = latestStatusChange?.status?.new === SUCCESS_STATUS;
+                const previousStatus60Count = olderStatusChanges.filter((item: any) => item.status?.new === SUCCESS_STATUS).length;
+                const hasStatus60Before = previousStatus60Count > 0;
+                const shouldCreateVoucher = latestIsStatus60 && !hasStatus60Before;
 
-                // Đếm số lần chuyển sang status 60
-                const status60Count = history.filter((item: any) =>
-                    item.orderId === orderId && item.status?.new === 60
-                ).length;
-
-                // Tìm lần đầu tiên chuyển sang status 60 (event cuối cùng trong mảng)
-                const status60Events = history.filter((item: any) =>
-                    item.orderId === orderId && item.status?.new === 60
-                );
-                const firstStatus60 = status60Events.length > 0 ? status60Events[status60Events.length - 1] : null;
+                const firstStatus60 = [...history]
+                    .reverse()
+                    .find((item: any) => item.status?.new === SUCCESS_STATUS) || null;
 
                 res.status(200).json({
                     success: true,
@@ -558,19 +559,31 @@ export class NhanhController {
                     data: {
                         history,
                         analysis: {
+                            filteredSteps: [ORDER_STATUS_CHANGE_STEP],
                             totalEvents: history.length,
-                            status60Count,
+                            latestIsStatus60,
+                            previousStatus60Count,
                             hasStatus60Before,
-                            shouldCreateVoucher: !hasStatus60Before, // Chỉ tạo nếu chưa từng có
+                            shouldCreateVoucher,
+                            latestStatusChange: latestStatusChange ? {
+                                createdAt: new Date(latestStatusChange.createdAt * 1000).toISOString(),
+                                createdBy: latestStatusChange.createdBy,
+                                oldStatus: latestStatusChange.status?.old,
+                                newStatus: latestStatusChange.status?.new
+                            } : null,
                             firstStatus60Event: firstStatus60 ? {
                                 createdAt: new Date(firstStatus60.createdAt * 1000).toISOString(),
                                 createdBy: firstStatus60.createdBy,
                                 oldStatus: firstStatus60.status?.old,
                                 newStatus: firstStatus60.status?.new
                             } : null,
-                            note: hasStatus60Before
-                                ? `Đã từng hoàn thành ${status60Count} lần → Skip (không tạo chứng từ)`
-                                : 'Chưa từng hoàn thành → Sẽ tạo chứng từ'
+                            note: !latestStatusChange
+                                ? `Không có record step ${ORDER_STATUS_CHANGE_STEP} nào → Skip`
+                                : shouldCreateVoucher
+                                    ? `Record step ${ORDER_STATUS_CHANGE_STEP} mới nhất có NEW=${SUCCESS_STATUS} và chưa từng có NEW=${SUCCESS_STATUS} trước đó → Sẽ tạo chứng từ`
+                                    : latestIsStatus60
+                                        ? `Đã có ${previousStatus60Count} record step ${ORDER_STATUS_CHANGE_STEP} cũ hơn với NEW=${SUCCESS_STATUS} → Skip (đã lập chứng từ)`
+                                        : `Record step ${ORDER_STATUS_CHANGE_STEP} mới nhất không có NEW=${SUCCESS_STATUS} → Skip`
                         }
                     },
                     message: 'Order history retrieved successfully'

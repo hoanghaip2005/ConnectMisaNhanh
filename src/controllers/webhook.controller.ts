@@ -7,6 +7,9 @@ import amisService from '../services/amis.services';
 import webhookQueueService from '../services/webhook-queue.services';
 import logger from '../utils/logger';
 
+const ORDER_STATUS_CHANGE_STEP = 7;
+const SUCCESS_STATUS = 60;
+
 /**
  * Webhook Controller
  * Handles incoming webhooks from Nhanh.vn
@@ -175,17 +178,17 @@ class WebhookController {
             }
 
             // ✅ KIỂM TRA LỊCH SỬ ĐƠN HÀNG - Tránh tạo chứng từ trùng lặp
-            const isFirstTimeStatus60 = await this.checkIfFirstTimeStatus60(orderId);
+            const shouldCreateVoucher = await this.shouldCreateVoucherFromHistory(orderId);
 
-            if (!isFirstTimeStatus60) {
-                logger.info(`Order ${orderId} - Already processed before (not first time status 60), skipping...`);
+            if (!shouldCreateVoucher) {
+                logger.info(`Order ${orderId} - History shows voucher already created or latest step 7 status change is not confirmed as 60, skipping...`);
                 if (queueId) {
-                    await webhookQueueService.markAsFailed(queueId, 'Not first time status 60');
+                    await webhookQueueService.markAsFailed(queueId, 'Order history shows voucher already created or latest step 7 status change is not confirmed as 60');
                 }
                 return;
             }
 
-            logger.info(`Order ${orderId} - First time reaching status 60, creating voucher...`);
+            logger.info(`Order ${orderId} - Latest step 7 record confirms first NEW=60, creating voucher...`);
 
             // Lấy chi tiết đơn hàng từ Nhanh.vn
             const orderResponse = await this.nhanhService.getOrder(orderId);
@@ -284,59 +287,67 @@ class WebhookController {
     /**
      * Kiểm tra xem đơn hàng có nên tạo chứng từ không
      * 
-     * Logic: Webhook đến với status 60
-     * - Bỏ qua record MỚI NHẤT (do webhook này tạo ra)
-     * - Check các record CŨ HƠN: Đã có NEW=60 chưa?
-     * - CHƯA có → CREATE (lần đầu)
-     * - ĐÃ có → SKIP (đã lập rồi)
+     * Logic:
+     * - Chỉ xét step = 7 (Đổi trạng thái)
+     * - Record MỚI NHẤT phải có status.new = 60 thì webhook hiện tại mới hợp lệ
+     * - Nếu trong các record CŨ HƠN đã có status.new = 60 thì coi như đã lập chứng từ rồi
+     * - Chỉ CREATE khi record mới nhất là NEW=60 và chưa từng có NEW=60 trước đó
+     * - Nếu không lấy được step 7 history hoặc record mới nhất không phải NEW=60 thì SKIP
      * 
      * Ví dụ:
-     * - History: [54→60 (latest), undefined→54] → CREATE (chỉ có 1 record NEW=60)
-     * - History: [undefined→undefined (latest), 54→60, ...] → SKIP (đã có NEW=60 trước đó)
-     * - History: [54→60 (latest), 56→60, ...] → SKIP (đã có NEW=60 trước đó)
+     * - History(step 7): [54→60 (latest), undefined→54] → CREATE
+     * - History(step 7): [60→80 (latest), 54→60, ...] → SKIP
+     * - History(step 7): [54→60 (latest), 56→60, ...] → SKIP
      * 
      * @param orderId - ID đơn hàng
      * @returns true nếu nên tạo chứng từ, false nếu skip
      */
-    private async checkIfFirstTimeStatus60(orderId: number): Promise<boolean> {
+    private async shouldCreateVoucherFromHistory(orderId: number): Promise<boolean> {
         try {
-            // Lấy lịch sử thao tác đơn hàng
-            const historyResponse = await this.nhanhService.getOrderHistory([orderId]);
+            const historyResponse = await this.nhanhService.getOrderHistory([orderId], {
+                steps: [ORDER_STATUS_CHANGE_STEP]
+            });
 
             if (!historyResponse || !historyResponse.data || historyResponse.data.length === 0) {
-                // Không có lịch sử -> CREATE (fail-safe, không bỏ sót)
-                logger.info(`Order ${orderId} - No history. CREATE (fail-safe)`);
-                return true;
-            }
-
-            // Sắp xếp theo thời gian giảm dần (mới nhất trước)
-            const sortedHistory = historyResponse.data.sort((a: any, b: any) => b.createdAt - a.createdAt);
-
-            // Bỏ qua record MỚI NHẤT (do webhook này tạo ra)
-            // Check các record CŨ HƠN: Đã có NEW=60 chưa?
-            const olderRecords = sortedHistory.slice(1);
-
-            if (olderRecords.length === 0) {
-                // Chỉ có 1 record (record mới nhất) -> Lần đầu
-                logger.info(`Order ${orderId} - Only 1 record in history. CREATE (first time)`);
-                return true;
-            }
-
-            const hasStatus60Before = olderRecords.some((item: any) => item.status?.new === 60);
-
-            if (hasStatus60Before) {
-                logger.info(`Order ${orderId} - Found NEW=60 in older records. SKIP (already processed)`);
+                logger.info(`Order ${orderId} - No step ${ORDER_STATUS_CHANGE_STEP} history. SKIP`);
                 return false;
             }
 
-            // Chưa có NEW=60 trong các record cũ hơn → CREATE
-            logger.info(`Order ${orderId} - No NEW=60 in older records. CREATE voucher (first time)`);
+            const statusChangeHistory = historyResponse.data
+                .filter((item: any) => item.orderId === orderId)
+                .sort((a: any, b: any) => b.createdAt - a.createdAt);
+
+            if (statusChangeHistory.length === 0) {
+                logger.info(`Order ${orderId} - No step ${ORDER_STATUS_CHANGE_STEP} history for this order. SKIP`);
+                return false;
+            }
+
+            const latestRecord = statusChangeHistory[0];
+            const latestNewStatus = latestRecord.status?.new;
+
+            if (latestNewStatus !== SUCCESS_STATUS) {
+                logger.info(
+                    `Order ${orderId} - Latest step ${ORDER_STATUS_CHANGE_STEP} record has NEW=${latestNewStatus ?? 'undefined'}. SKIP`
+                );
+                return false;
+            }
+
+            const olderRecords = statusChangeHistory.slice(1);
+            const hasStatus60Before = olderRecords.some((item: any) => item.status?.new === SUCCESS_STATUS);
+
+            if (hasStatus60Before) {
+                logger.info(`Order ${orderId} - Found older step ${ORDER_STATUS_CHANGE_STEP} record with NEW=${SUCCESS_STATUS}. SKIP`);
+                return false;
+            }
+
+            logger.info(
+                `Order ${orderId} - Latest step ${ORDER_STATUS_CHANGE_STEP} record is NEW=${SUCCESS_STATUS} and no older NEW=${SUCCESS_STATUS}. CREATE voucher`
+            );
             return true;
 
         } catch (error: any) {
-            // Nếu lỗi → Fail-safe: CREATE (không bỏ sót đơn)
-            logger.error(`Order ${orderId} - Error checking history, CREATE (fail-safe):`, error.message);
-            return true;
+            logger.error(`Order ${orderId} - Error checking history. SKIP:`, error.message);
+            return false;
         }
     }    /**
      * Get webhook status and configuration
