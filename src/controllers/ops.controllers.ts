@@ -1,10 +1,15 @@
 import { Request, Response } from 'express';
 import opsDashboardService from '../services/ops-dashboard.services';
 import logger from '../utils/logger';
+import webhookController from './webhook.controller';
 import {
     renderOpsDashboardPage,
     renderOpsDashboardScript
 } from '../views/ops-dashboard.view';
+import {
+    renderManualOrderPage,
+    renderManualOrderScript
+} from '../views/ops-manual-order.view';
 
 function parsePositiveInteger(input: string | string[] | undefined, fallbackValue: number): number {
     const normalizedInput = Array.isArray(input) ? input[0] : input;
@@ -28,6 +33,14 @@ export function getOpsDashboardPage(req: Request, res: Response): void {
 
 export function getOpsDashboardScript(req: Request, res: Response): void {
     res.type('application/javascript').send(renderOpsDashboardScript());
+}
+
+export function getOpsManualOrderPage(req: Request, res: Response): void {
+    res.type('html').send(renderManualOrderPage(process.env.SERVER_URL));
+}
+
+export function getOpsManualOrderScript(req: Request, res: Response): void {
+    res.type('application/javascript').send(renderManualOrderScript());
 }
 
 export async function getOpsOverview(req: Request, res: Response): Promise<void> {
@@ -92,4 +105,8 @@ export async function getOpsLogs(req: Request, res: Response): Promise<void> {
             message: error.message || 'Unable to read logs'
         });
     }
+}
+
+export async function processOpsManualOrder(req: Request, res: Response): Promise<void> {
+    await webhookController.manualProcessOrder(req, res);
 }

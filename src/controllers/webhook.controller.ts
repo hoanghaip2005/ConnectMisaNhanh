@@ -414,10 +414,23 @@ class WebhookController {
                 return;
             }
 
+            const alreadyProcessed = await webhookQueueService.isOrderProcessed(orderId);
+
+            if (alreadyProcessed) {
+                res.status(200).json({
+                    success: true,
+                    orderId,
+                    alreadyProcessed: true,
+                    message: `Order ${orderId} already exists in processed_orders`
+                });
+                return;
+            }
+
             logger.info(`Manual processing order ${orderId}...`);
 
             // Process the order (sử dụng method private đã có)
             await this.processOrderEvent(orderId, 60); // Status 60 = Thành công
+            await webhookQueueService.recordProcessedOrder(orderId);
 
             res.status(200).json({
                 success: true,
