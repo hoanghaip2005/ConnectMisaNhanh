@@ -114,23 +114,6 @@ class WebhookQueueService {
     }
 
     /**
-     * Đánh dấu order đã được xử lý thành công khi chạy thủ công
-     */
-    public async recordProcessedOrder(orderId: number): Promise<void> {
-        try {
-            await db.query(
-                'INSERT IGNORE INTO processed_orders (order_id) VALUES (?)',
-                [orderId]
-            );
-
-            logger.info(`Order ${orderId} recorded in processed_orders`);
-        } catch (error: any) {
-            logger.error('Error recording processed order:', error);
-            throw error;
-        }
-    }
-
-    /**
      * Đánh dấu xử lý thất bại
      */
     public async markAsFailed(queueId: number, errorMessage: string): Promise<void> {

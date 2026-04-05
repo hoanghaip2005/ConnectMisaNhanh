@@ -189,55 +189,7 @@ class WebhookController {
             }
 
             logger.info(`Order ${orderId} - Latest step 7 record confirms first NEW=60, creating voucher...`);
-
-            // Lấy chi tiết đơn hàng từ Nhanh.vn
-            const orderResponse = await this.nhanhService.getOrder(orderId);
-
-            if (!orderResponse || !orderResponse.data) {
-                logger.error(`Order ${orderId} not found`);
-                if (queueId) {
-                    await webhookQueueService.markAsFailed(queueId, 'Order not found in Nhanh.vn');
-                }
-                return;
-            }
-
-            const order = orderResponse.data;
-
-            // Nếu saleChannel chưa được truyền vào, lấy từ order
-            if (!saleChannel) {
-                saleChannel = order.channel?.saleChannel || order.saleChannel;
-                logger.info(`Order ${orderId} - saleChannel from API: ${saleChannel}`);
-            }
-
-            // Transform đơn hàng
-            const transformedRows = transformService.transformSingleOrder(order);
-
-            // Map sang format AMIS (truyền saleChannel để phân biệt Shopee vs kênh khác)
-            const voucher = await amisMapperService.mapToAmisVoucher({
-                orderId: orderId,
-                data: transformedRows
-            }, undefined, saleChannel);  // undefined = invNo, saleChannel để phân biệt KH00509 vs KH000002
-
-            // Lấy access token hiện tại
-            const accessToken = process.env.MISA_ACCESS_TOKEN;
-
-            if (!accessToken) {
-                logger.error(`Order ${orderId} - Missing MISA access token`);
-                if (queueId) {
-                    await webhookQueueService.markAsFailed(queueId, 'Missing MISA access token');
-                }
-                return;
-            }
-
-            // Gửi lên MISA
-            const result = await amisService.saveVoucher([voucher], accessToken);
-
-            // ✅ Đánh dấu đã xử lý thành công
-            if (queueId) {
-                await webhookQueueService.markAsProcessed(orderId, queueId);
-            }
-
-            logger.info(`Order ${orderId} sent to MISA successfully`);
+            await this.createVoucherFromOrder(orderId, saleChannel, queueId);
 
         } catch (error: any) {
             logger.error(`Error processing order ${orderId}`, error);
@@ -246,6 +198,44 @@ class WebhookController {
             }
             throw error;
         }
+    }
+
+    /**
+     * Tạo chứng từ từ orderId mà không áp dụng rule đặc thù webhook
+     */
+    private async createVoucherFromOrder(orderId: number, saleChannel?: number, queueId?: number): Promise<void> {
+        const orderResponse = await this.nhanhService.getOrder(orderId);
+
+        if (!orderResponse || !orderResponse.data) {
+            throw new Error('Order not found in Nhanh.vn');
+        }
+
+        const order = orderResponse.data;
+        const resolvedSaleChannel = saleChannel ?? order.channel?.saleChannel ?? order.saleChannel;
+
+        if (saleChannel === undefined || saleChannel === null) {
+            logger.info(`Order ${orderId} - saleChannel from API: ${resolvedSaleChannel}`);
+        }
+
+        const transformedRows = transformService.transformSingleOrder(order);
+        const voucher = await amisMapperService.mapToAmisVoucher({
+            orderId,
+            data: transformedRows
+        }, undefined, resolvedSaleChannel);
+
+        const accessToken = process.env.MISA_ACCESS_TOKEN;
+
+        if (!accessToken) {
+            throw new Error('Missing MISA access token');
+        }
+
+        await amisService.saveVoucher([voucher], accessToken);
+
+        if (queueId) {
+            await webhookQueueService.markAsProcessed(orderId, queueId);
+        }
+
+        logger.info(`Order ${orderId} sent to MISA successfully`);
     }
 
     /**
@@ -414,23 +404,10 @@ class WebhookController {
                 return;
             }
 
-            const alreadyProcessed = await webhookQueueService.isOrderProcessed(orderId);
-
-            if (alreadyProcessed) {
-                res.status(200).json({
-                    success: true,
-                    orderId,
-                    alreadyProcessed: true,
-                    message: `Order ${orderId} already exists in processed_orders`
-                });
-                return;
-            }
-
             logger.info(`Manual processing order ${orderId}...`);
 
-            // Process the order (sử dụng method private đã có)
-            await this.processOrderEvent(orderId, 60); // Status 60 = Thành công
-            await webhookQueueService.recordProcessedOrder(orderId);
+            // Luồng thủ công không dùng điều kiện processed_orders/history của webhook
+            await this.createVoucherFromOrder(orderId);
 
             res.status(200).json({
                 success: true,
