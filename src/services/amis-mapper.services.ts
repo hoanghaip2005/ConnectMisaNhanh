@@ -102,11 +102,11 @@ export class AmisMapperService {
         // Số hóa đơn (nếu có, nếu không dùng mã đơn hàng)
         const invoiceNo = invNo || `BH${orderId}`;
 
-        // Tạo tên khách hàng: "Người mua không cung cấp thông tin - {orderId}"
-        const accountObjectName = `Người mua không cung cấp thông tin - ${orderId}`;
+        const buyerName = (firstRow.customerName || '').trim() || accountObjectType;
+        const accountObjectName = `${buyerName} - ${orderId}`;
 
         // Journal memo (diễn giải chung)
-        const journalMemo = `Bán hàng Người mua không cung cấp thông tin - ${orderId} theo số hoá đơn số ${invoiceNo}`;
+        const journalMemo = `Bán hàng ${accountObjectName} theo số hoá đơn số ${invoiceNo}`;
 
         // Thời gian hiện tại
         const currentDateTime = this.getCurrentDateTime();
@@ -174,7 +174,7 @@ export class AmisMapperService {
             account_object_id: accountObjectId,      // ID khách hàng
             account_object_code: accountObjectCode,  // KH00509 (Shopee) hoặc KH000002 (khác)
             account_object_name: accountObjectName,
-            payer: accountObjectType,  // "KHÁCH LẺ SHOPEE" hoặc "Khách lẻ"
+            payer: buyerName,  // Tên người mua
             journal_memo: journalMemo,  // Diễn giải
             currency_id: 'VND',
             exchange_rate: 1,
@@ -185,7 +185,7 @@ export class AmisMapperService {
                 account_object_code: accountObjectCode,
                 account_object_name: accountObjectName,
                 branch_id: this.branchId,
-                buyer: accountObjectType,      // Người mua hàng
+                buyer: buyerName,              // Người mua hàng
                 currency_id: 'VND',
                 exchange_rate: 1,
                 is_invoice_machine: true,
@@ -204,7 +204,7 @@ export class AmisMapperService {
                 account_object_code: accountObjectCode,
                 account_object_name: accountObjectName,
                 branch_id: this.branchId,
-                contact_name: accountObjectType, // Người liên hệ
+                contact_name: buyerName,       // Người liên hệ
                 journal_memo: journalMemo,
                 posted_date: currentDateTime,
                 refdate: currentDateTime,
@@ -240,7 +240,7 @@ export class AmisMapperService {
 
         const billId = bill.id;
         const billType = bill.type; // 1 = Trả hàng, 2 = Xuất kho bán lẻ
-        const customerName = bill.customer?.name || 'Khách lẻ';
+        const customerName = (bill.customer?.name || '').trim() || 'Khách lẻ';
 
         // Kiểm tra tất cả mã vật tư từ Nhanh.vn có tồn tại trong MISA không
         const productCodes = bill.products.map((p: any) => p.code);
@@ -347,7 +347,7 @@ export class AmisMapperService {
             account_object_id: 'c47e72a9-288d-4b7c-ba14-8aef0c046550',  // ID khách hàng KH000002
             account_object_code: 'KH000002',  // Mã khách hàng mặc định cho hoá đơn bán lẻ
             account_object_name: accountObjectName,
-            payer: accountObjectName,  // Người liên hệ là tên khách hàng
+            payer: customerName,  // Tên người mua
             journal_memo: journalMemo,
             currency_id: 'VND',
             exchange_rate: 1,
@@ -358,7 +358,7 @@ export class AmisMapperService {
                 account_object_code: 'KH000002',
                 account_object_name: accountObjectName,
                 branch_id: this.branchId,
-                buyer: accountObjectName,      // Người mua hàng
+                buyer: customerName,      // Người mua hàng
                 currency_id: 'VND',
                 exchange_rate: 1,
                 is_invoice_machine: true,
@@ -377,7 +377,7 @@ export class AmisMapperService {
                 account_object_code: 'KH000002',
                 account_object_name: accountObjectName,
                 branch_id: this.branchId,
-                contact_name: accountObjectName, // Người liên hệ
+                contact_name: customerName, // Người liên hệ
                 journal_memo: journalMemo,
                 posted_date: currentDateTime,
                 refdate: currentDateTime,
