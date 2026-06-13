@@ -10,6 +10,11 @@ import logger from '../utils/logger';
 const ORDER_STATUS_CHANGE_STEP = 7;
 const SUCCESS_STATUS = 60;
 
+interface VoucherHistoryDecision {
+    shouldCreate: boolean;
+    skipReason?: string;
+}
+
 /**
  * Webhook Controller
  * Handles incoming webhooks from Nhanh.vn
@@ -172,18 +177,19 @@ class WebhookController {
                     logger.debug(`Order ${orderId} skipped - status: ${status}, channel: ${saleChannel}`);
                 }
                 if (queueId) {
-                    await webhookQueueService.markAsFailed(queueId, 'Status not 60 or not Shopee channel');
+                    await webhookQueueService.markAsSkipped(queueId, 'Status not 60 or not Shopee channel');
                 }
                 return;
             }
 
             // ✅ KIỂM TRA LỊCH SỬ ĐƠN HÀNG - Tránh tạo chứng từ trùng lặp
-            const shouldCreateVoucher = await this.shouldCreateVoucherFromHistory(orderId);
+            const voucherDecision = await this.shouldCreateVoucherFromHistory(orderId);
 
-            if (!shouldCreateVoucher) {
-                logger.info(`Order ${orderId} - History shows voucher already created or latest step 7 status change is not confirmed as 60, skipping...`);
+            if (!voucherDecision.shouldCreate) {
+                const reason = voucherDecision.skipReason || 'Order history shows voucher already created or latest step 7 status change is not confirmed as 60';
+                logger.info(`Order ${orderId} skipped: ${reason}`);
                 if (queueId) {
-                    await webhookQueueService.markAsFailed(queueId, 'Order history shows voucher already created or latest step 7 status change is not confirmed as 60');
+                    await webhookQueueService.markAsSkipped(queueId, reason);
                 }
                 return;
             }
@@ -292,15 +298,16 @@ class WebhookController {
      * @param orderId - ID đơn hàng
      * @returns true nếu nên tạo chứng từ, false nếu skip
      */
-    private async shouldCreateVoucherFromHistory(orderId: number): Promise<boolean> {
+    private async shouldCreateVoucherFromHistory(orderId: number): Promise<VoucherHistoryDecision> {
         try {
             const historyResponse = await this.nhanhService.getOrderHistory([orderId], {
                 steps: [ORDER_STATUS_CHANGE_STEP]
             });
 
             if (!historyResponse || !historyResponse.data || historyResponse.data.length === 0) {
-                logger.info(`Order ${orderId} - No step ${ORDER_STATUS_CHANGE_STEP} history. SKIP`);
-                return false;
+                const skipReason = `No step ${ORDER_STATUS_CHANGE_STEP} history`;
+                logger.info(`Order ${orderId} - ${skipReason}. SKIP`);
+                return { shouldCreate: false, skipReason };
             }
 
             const statusChangeHistory = historyResponse.data
@@ -308,36 +315,44 @@ class WebhookController {
                 .sort((a: any, b: any) => b.createdAt - a.createdAt);
 
             if (statusChangeHistory.length === 0) {
-                logger.info(`Order ${orderId} - No step ${ORDER_STATUS_CHANGE_STEP} history for this order. SKIP`);
-                return false;
+                const skipReason = `No step ${ORDER_STATUS_CHANGE_STEP} history for this order`;
+                logger.info(`Order ${orderId} - ${skipReason}. SKIP`);
+                return { shouldCreate: false, skipReason };
             }
 
             const latestRecord = statusChangeHistory[0];
             const latestNewStatus = latestRecord.status?.new;
 
             if (latestNewStatus !== SUCCESS_STATUS) {
-                logger.info(
-                    `Order ${orderId} - Latest step ${ORDER_STATUS_CHANGE_STEP} record has NEW=${latestNewStatus ?? 'undefined'}. SKIP`
-                );
-                return false;
+                const skipReason = `Latest step ${ORDER_STATUS_CHANGE_STEP} record has NEW=${latestNewStatus ?? 'undefined'}`;
+                logger.info(`Order ${orderId} - ${skipReason}. SKIP`);
+                return { shouldCreate: false, skipReason };
             }
 
             const olderRecords = statusChangeHistory.slice(1);
             const hasStatus60Before = olderRecords.some((item: any) => item.status?.new === SUCCESS_STATUS);
 
             if (hasStatus60Before) {
-                logger.info(`Order ${orderId} - Found older step ${ORDER_STATUS_CHANGE_STEP} record with NEW=${SUCCESS_STATUS}. SKIP`);
-                return false;
+                const skipReason = `Found older step ${ORDER_STATUS_CHANGE_STEP} record with NEW=${SUCCESS_STATUS}`;
+                logger.info(`Order ${orderId} - ${skipReason}. SKIP`);
+                return { shouldCreate: false, skipReason };
             }
 
             logger.info(
                 `Order ${orderId} - Latest step ${ORDER_STATUS_CHANGE_STEP} record is NEW=${SUCCESS_STATUS} and no older NEW=${SUCCESS_STATUS}. CREATE voucher`
             );
-            return true;
+            return { shouldCreate: true };
 
         } catch (error: any) {
-            logger.error(`Order ${orderId} - Error checking history. SKIP:`, error.message);
-            return false;
+            const message = error?.message || 'Unknown history error';
+
+            if (message.includes('Order without histories')) {
+                logger.info(`Order ${orderId} - Order without histories. SKIP`);
+                return { shouldCreate: false, skipReason: 'Order without histories' };
+            }
+
+            logger.error(`Order ${orderId} - Error checking history`, error);
+            throw error;
         }
     }    /**
      * Get webhook status and configuration

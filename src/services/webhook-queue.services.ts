@@ -7,7 +7,7 @@ export interface WebhookQueueItem {
     order_id: number;
     business_id?: number;
     payload: any;
-    status?: 'pending' | 'processing' | 'completed' | 'failed';
+    status?: 'pending' | 'processing' | 'completed' | 'failed' | 'skipped';
     retry_count?: number;
     error_message?: string;
     created_at?: Date;
@@ -131,6 +131,26 @@ class WebhookQueueService {
             logger.warn(`Queue item ${queueId} marked as failed: ${errorMessage}`);
         } catch (error: any) {
             logger.error('Error marking as failed:', error);
+        }
+    }
+
+    /**
+     * Danh dau webhook da duoc bo qua theo dung business rule.
+     */
+    public async markAsSkipped(queueId: number, reason: string): Promise<void> {
+        try {
+            await db.query(
+                `UPDATE webhook_queue
+                 SET status = 'skipped',
+                     error_message = ?,
+                     processed_at = NOW()
+                 WHERE id = ?`,
+                [reason, queueId]
+            );
+
+            logger.info(`Queue item ${queueId} marked as skipped: ${reason}`);
+        } catch (error: any) {
+            logger.error('Error marking as skipped:', error);
         }
     }
 

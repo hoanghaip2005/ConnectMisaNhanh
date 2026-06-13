@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS webhook_queue (
     order_id BIGINT NOT NULL,
     business_id INT,
     payload JSON NOT NULL,
-    status ENUM('pending', 'processing', 'completed', 'failed') DEFAULT 'pending',
+    status ENUM('pending', 'processing', 'completed', 'failed', 'skipped') DEFAULT 'pending',
     retry_count INT DEFAULT 0,
     error_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

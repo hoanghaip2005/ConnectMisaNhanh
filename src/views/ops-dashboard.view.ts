@@ -282,6 +282,11 @@ export function renderOpsDashboardPage(serverUrl?: string): string {
             background: var(--danger-soft);
         }
 
+        .status.skipped {
+            color: #475569;
+            background: rgba(100, 116, 139, 0.14);
+        }
+
         .log-block {
             margin: 0;
             min-height: 280px;
@@ -529,6 +534,7 @@ function renderStatCards(summary) {
         { label: 'Pending', value: summary.pending, note: 'Waiting for processing' },
         { label: 'Processing', value: summary.processing, note: 'Currently being handled' },
         { label: 'Completed', value: summary.completed, note: 'Finished successfully' },
+        { label: 'Skipped', value: summary.skipped, note: 'Ignored by business rules' },
         { label: 'Failed', value: summary.failed, note: 'Needs checking' },
         { label: 'Processed Orders', value: summary.totalProcessedOrders, note: 'Written to processed_orders' }
     ];
@@ -573,7 +579,7 @@ function renderQueueTable(rows) {
             '<td>' + escapeHtml(row.retry_count || 0) + '</td>' +
             '<td>' + escapeHtml(formatDate(row.created_at)) + '</td>' +
             '<td>' + escapeHtml(formatDate(row.processed_at)) + '</td>' +
-            '<td class="' + (row.error_message ? 'error-text' : '') + '">' + escapeHtml(row.error_message || '-') + '</td>' +
+            '<td class="' + (row.status === 'failed' && row.error_message ? 'error-text' : '') + '">' + escapeHtml(row.error_message || '-') + '</td>' +
         '</tr>';
     }).join('');
 }
@@ -616,7 +622,7 @@ function renderLookup(data) {
                 '<div style="margin-top: 8px;">Created: ' + escapeHtml(formatDate(item.created_at)) + '</div>' +
                 '<div>Processed: ' + escapeHtml(formatDate(item.processed_at)) + '</div>' +
                 '<div>Retries: ' + escapeHtml(item.retry_count || 0) + '</div>' +
-                '<div class="' + (item.error_message ? 'error-text' : '') + '">Error: ' + escapeHtml(item.error_message || '-')
+                '<div class="' + (item.status === 'failed' && item.error_message ? 'error-text' : '') + '">Message: ' + escapeHtml(item.error_message || '-')
                 + '</div>' +
             '</div>';
         }).join(''));

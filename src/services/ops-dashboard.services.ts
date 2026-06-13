@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import db from '../database/mysql';
 
-type QueueStatus = 'pending' | 'processing' | 'completed' | 'failed';
+type QueueStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'skipped';
 
 interface QueueSummaryRow {
     total_queue: number;
@@ -10,6 +10,7 @@ interface QueueSummaryRow {
     processing: number;
     completed: number;
     failed: number;
+    skipped: number;
     last_webhook_at: Date | null;
 }
 
@@ -55,6 +56,7 @@ class OpsDashboardService {
                 COALESCE(SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END), 0) AS processing,
                 COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
                 COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+                COALESCE(SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END), 0) AS skipped,
                 MAX(created_at) AS last_webhook_at
              FROM webhook_queue`
         );
@@ -109,6 +111,7 @@ class OpsDashboardService {
             processing: 0,
             completed: 0,
             failed: 0,
+            skipped: 0,
             last_webhook_at: null
         };
 
@@ -128,6 +131,7 @@ class OpsDashboardService {
                     processing: queueSummary.processing,
                     completed: queueSummary.completed,
                     failed: queueSummary.failed,
+                    skipped: queueSummary.skipped,
                     totalProcessedOrders: processedSummary.total_processed_orders,
                     lastWebhookAt: queueSummary.last_webhook_at
                 }
